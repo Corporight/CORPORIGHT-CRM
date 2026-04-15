@@ -1,0 +1,2 @@
+CREATE INDEX "idx_relations_type" ON "relations" USING btree ("relation_type");--> statement-breakpoint
+ALTER TABLE "relations" ADD CONSTRAINT "relations_validity_range" CHECK ("relations"."valid_from" IS NULL OR "relations"."valid_to" IS NULL OR "relations"."valid_to" >= "relations"."valid_from");

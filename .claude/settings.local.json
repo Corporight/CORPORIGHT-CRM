@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(npx tsc:*)",
+      "Bash(npm run:*)",
+      "Bash(npx drizzle-kit:*)",
+      "Bash(node -e \"require\\('tsx'\\)\")",
+      "Bash(npx tsx:*)",
+      "Bash(DATABASE_URL=postgresql://postgres:postgres@localhost:5432/corporight_crm npx tsx --tsconfig tsconfig.json scripts/smoke-flow1.ts)",
+      "Bash(npx eslint *)"
+    ]
+  }
+}
