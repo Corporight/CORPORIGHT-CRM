@@ -1,7 +1,6 @@
 import { z } from 'zod'
 import {
   FINANCE_DIRECTIONS,
-  PAYMENT_GROUP_SOURCES,
   FINANCIAL_MOVEMENT_VAT_MODES,
 } from '@/db/schema'
 
