@@ -43,6 +43,13 @@
       "when": 1776181659437,
       "tag": "0005_gifted_malice",
       "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "7",
+      "when": 1776222209130,
+      "tag": "0006_woozy_boomerang",
+      "breakpoints": true
     }
   ]
 }
