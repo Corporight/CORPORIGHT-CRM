@@ -49,3 +49,5 @@ Rules:
 - Do not turn minor polish into blockers
 - Optimize for clean branch closure
 - Prefer explicit shipping guidance over vague advice
+- Do not run any tools or commands (no Bash, no file reads unless explicitly requested)
+- Rely only on the provided context
