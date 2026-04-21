@@ -612,7 +612,7 @@ export async function cancelPaymentAllocation(
     return { success: false, error: parsed.error.issues[0].message }
   }
 
-  const { paymentAllocationId, cancelledBy } = parsed.data
+  const { paymentAllocationId, cancelledBy, cancelledReason } = parsed.data
 
   try {
     const now = new Date()
@@ -716,6 +716,7 @@ export async function cancelPaymentAllocation(
           orderId: current.orderId,
           allocatedAmount: current.allocatedAmount,
           cancelledAt: now.toISOString(),
+          ...(cancelledReason ? { cancelledReason } : {}),
         },
         userId: cancelledBy ?? null,
       })
@@ -744,6 +745,9 @@ export type PaymentGroupListItem = {
   processingStatus: string
   currency: string
   transactionDate: string
+  counterpartyName: string | null
+  counterpartyAccountNumber: string | null
+  variableSymbol: string | null
   source: string
   note: string | null
   createdAt: Date
@@ -784,6 +788,9 @@ export async function listPaymentGroups(
           processingStatus: paymentGroups.processingStatus,
           currency: paymentGroups.currency,
           transactionDate: paymentGroups.transactionDate,
+          counterpartyName: paymentGroups.counterpartyName,
+          counterpartyAccountNumber: paymentGroups.counterpartyAccountNumber,
+          variableSymbol: paymentGroups.variableSymbol,
           source: paymentGroups.source,
           note: paymentGroups.note,
           createdAt: paymentGroups.createdAt,

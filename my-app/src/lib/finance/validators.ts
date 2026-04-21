@@ -127,6 +127,8 @@ export type CreatePaymentAllocationInput = z.input<typeof createPaymentAllocatio
 export const cancelPaymentAllocationSchema = z.object({
   paymentAllocationId: z.string().uuid('paymentAllocationId must be a UUID'),
   cancelledBy: z.string().uuid().optional(),
+  // audit-only — stored in audit_log.diff; no column on payment_allocations in Phase 1
+  cancelledReason: z.string().optional(),
 })
 export type CancelPaymentAllocationInput = z.input<typeof cancelPaymentAllocationSchema>
 
