@@ -74,6 +74,11 @@ async function main() {
   await sql`DELETE FROM order_items WHERE order_id = ${ORDER_ID}`
   await sql`DELETE FROM orders WHERE id = ${ORDER_ID}`
   await sql`DELETE FROM subjects WHERE id = ${CLIENT_ID}`
+  // Clean up tree seed data so the script is safe to re-run.
+  await sql`DELETE FROM financial_tree_details WHERE code LIKE 'SMOKE-%'`
+  await sql`DELETE FROM financial_tree_types WHERE code LIKE 'SMOKE-%'`
+  await sql`DELETE FROM financial_tree_categories WHERE code LIKE 'SMOKE-%'`
+  await sql`DELETE FROM centers WHERE code LIKE 'SMOKE-%'`
   console.log('  cleaned up prior rows')
 
   // Insert client subject.

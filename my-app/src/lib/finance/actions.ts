@@ -474,11 +474,15 @@ export async function createPaymentAllocation(
   try {
     const result = await db.transaction(async (tx): Promise<{ error: string } | { id: string }> => {
       // Lock the payment group row to prevent concurrent over-allocation.
+      // Also re-read direction and processingStatus so the business guards
+      // use the locked row, not the potentially-stale pre-transaction read.
       const [pg] = await tx
         .select({
           id: paymentGroups.id,
           totalAmount: paymentGroups.totalAmount,
           allocatedAmount: paymentGroups.allocatedAmount,
+          direction: paymentGroups.direction,
+          processingStatus: paymentGroups.processingStatus,
         })
         .from(paymentGroups)
         .where(eq(paymentGroups.id, paymentGroupId))
@@ -486,6 +490,18 @@ export async function createPaymentAllocation(
 
       if (!pg) {
         return { error: `Payment group not found inside transaction: ${paymentGroupId}` }
+      }
+
+      // Re-validate after acquiring the lock — the pre-transaction read may be stale.
+      if (pg.direction !== 'INCOME') {
+        return {
+          error:
+            `Payment allocations can only be created against INCOME payment groups. ` +
+            `Payment group ${paymentGroupId} has direction ${pg.direction}.`,
+        }
+      }
+      if (pg.processingStatus === 'CANCELLED') {
+        return { error: `Cannot allocate to a CANCELLED payment group: ${paymentGroupId}.` }
       }
 
       // Compute new allocated total and check it does not exceed total_amount.
