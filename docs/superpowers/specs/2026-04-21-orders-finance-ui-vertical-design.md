@@ -130,7 +130,8 @@ Files to modify:
 - `src/lib/orders/actions.ts` — add `getOrderDetail`
 - `src/lib/finance/actions.ts` — add `cancelledReason` to `cancelPaymentAllocation`
 - `src/lib/finance/validators.ts` — add `cancelledReason` to `cancelPaymentAllocationSchema`
-- `src/app/layout.tsx` — update title/metadata, ensure body styles support CRM layout
+
+`src/app/layout.tsx` is not modified. This vertical is kept isolated from the existing root layout.
 
 ---
 
@@ -205,7 +206,7 @@ Server component. Receives economics data.
 Displays as a `Card`:
 - Order Total: formatted amount
 - Allocated Payments: formatted amount
-- Remaining: formatted amount (order total minus allocated; may be negative for OVERPAID)
+- Remaining / Overpaid by: when `orderTotal - allocatedPayments >= 0`, show as "Zbývá: X CZK"; when negative (OVERPAID), show as "Přeplatek: X CZK" with the absolute value
 - Payment Status: `Badge` with status value
 
 Amount formatting: `Intl.NumberFormat('cs-CZ', { style: 'currency', currency: 'CZK' })`.
@@ -216,8 +217,7 @@ Server component. Receives `orderId` and the list of allocations.
 
 Table columns: `Created | Amount | Payment Group | Note | Action`
 
-Only ACTIVE allocations appear in the main table body.
-CANCELLED allocations: if any exist, show a collapsed section below ("Zrušené alokace: N") — no full table needed for them in Phase 1.
+Only ACTIVE allocations appear in the table. CANCELLED allocations are hidden entirely in Phase 1.
 
 Each ACTIVE row has a "Zrušit" button that opens `CancelAllocationDialog`.
 Above the table, a "Přidat alokaci" button opens `AddAllocationDialog`.
@@ -230,8 +230,9 @@ The table shell passes `orderId` into the dialogs as a prop.
 Client component.
 
 **On dialog open:**
-- Calls `listPaymentGroups()` with no status filter — loads all payment groups
+- Calls `listPaymentGroups({ limit: 50 })` — uses the existing backend default, no status filter passed
 - Filters client-side to those with `direction === 'INCOME'` and `processingStatus` in `['NEW', 'PARTIALLY_ALLOCATED']`
+- Phase 1 assumption: limit 50 is sufficient; a dedicated server-side helper is a follow-up item
 
 **Payment group select options show:**
 ```
