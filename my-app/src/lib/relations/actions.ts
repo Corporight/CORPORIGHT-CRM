@@ -19,7 +19,6 @@
 import { db } from '@/db'
 import {
   relations as relationsTable,
-  relationAttributes,
   relationEvents,
   subjects,
   auditLog,
@@ -49,7 +48,7 @@ type DbTx = Parameters<Parameters<typeof db.transaction>[0]>[0]
 
 // ── createRelationInTx ─────────────────────────────────────────────
 // Internal helper — must be called within an existing db.transaction().
-// Inserts the relation row + attributes + a CREATED relation_event + audit_log.
+// Inserts the relation row + a CREATED relation_event + audit_log.
 // Returns the new relation ID, or throws on validation / constraint error.
 //
 // Callers: createRelation (wraps in its own tx), applyOrderChangeActionsForOrder.
@@ -61,9 +60,10 @@ export async function createRelationInTx(
     subjectBId: string
     relationType: string
     validFrom?: string
+    sharePercentage?: number | null
+    noteInternal?: string | null
     triggeredByOrderId?: string | null
     createdBy?: string | null
-    attributes?: { key: string; value: string }[]
   },
 ): Promise<string> {
   // Self-link guard (also enforced by DB CHECK, but surface early).
@@ -127,20 +127,11 @@ export async function createRelationInTx(
       relationType: input.relationType,
       validFrom,
       isActive: true,
+      sharePercentage: input.sharePercentage?.toString() ?? null,
+      noteInternal: input.noteInternal ?? null,
       createdBy: input.createdBy ?? null,
     })
     .returning({ id: relationsTable.id })
-
-  // Insert any type-specific attributes.
-  if (input.attributes && input.attributes.length > 0) {
-    await tx.insert(relationAttributes).values(
-      input.attributes.map((attr) => ({
-        relationId: relation.id,
-        key: attr.key,
-        value: attr.value,
-      })),
-    )
-  }
 
   // Immutable event record.
   await tx.insert(relationEvents).values({
@@ -152,7 +143,8 @@ export async function createRelationInTx(
       subjectBId: input.subjectBId,
       relationType: input.relationType,
       validFrom: validFrom.toISOString(),
-      attributes: input.attributes ?? [],
+      sharePercentage: input.sharePercentage ?? null,
+      noteInternal: input.noteInternal ?? null,
     },
     createdBy: input.createdBy ?? null,
   })
@@ -267,9 +259,10 @@ export async function createRelation(
         subjectBId: parsed.data.subjectBId,
         relationType: parsed.data.relationType,
         validFrom: parsed.data.validFrom,
+        sharePercentage: parsed.data.sharePercentage ?? null,
+        noteInternal: parsed.data.noteInternal ?? null,
         triggeredByOrderId: parsed.data.triggeredByOrderId ?? null,
         createdBy: parsed.data.createdBy ?? null,
-        attributes: parsed.data.attributes,
       }),
     )
     return { success: true, data: { id } }
@@ -317,8 +310,9 @@ export type RelationListItem = {
   isActive: boolean
   validFrom: Date | null
   validTo: Date | null
+  sharePercentage: string | null
+  noteInternal: string | null
   createdAt: Date
-  attributes: { key: string; value: string }[]
 }
 
 export async function listRelationsForSubject(
@@ -332,7 +326,7 @@ export async function listRelationsForSubject(
   const { subjectId, includeInactive, relationType } = parsed.data
 
   try {
-    const rows = await db
+    const items = await db
       .select({
         id: relationsTable.id,
         subjectAId: relationsTable.subjectAId,
@@ -341,6 +335,8 @@ export async function listRelationsForSubject(
         isActive: relationsTable.isActive,
         validFrom: relationsTable.validFrom,
         validTo: relationsTable.validTo,
+        sharePercentage: relationsTable.sharePercentage,
+        noteInternal: relationsTable.noteInternal,
         createdAt: relationsTable.createdAt,
       })
       .from(relationsTable)
@@ -355,18 +351,6 @@ export async function listRelationsForSubject(
         ),
       )
       .orderBy(relationsTable.createdAt)
-
-    // Fetch attributes per relation.
-    // Phase 1 simplification: N+1 is acceptable for the low volume of relations per subject.
-    const items = await Promise.all(
-      rows.map(async (row) => {
-        const attrs = await db
-          .select({ key: relationAttributes.key, value: relationAttributes.value })
-          .from(relationAttributes)
-          .where(eq(relationAttributes.relationId, row.id))
-        return { ...row, attributes: attrs }
-      }),
-    )
 
     return { success: true, data: { items } }
   } catch (err) {

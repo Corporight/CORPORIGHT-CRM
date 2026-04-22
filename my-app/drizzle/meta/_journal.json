@@ -64,6 +64,13 @@
       "when": 1776882631400,
       "tag": "0008_add_role_definitions",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1776886372483,
+      "tag": "0009_fix_relations_schema",
+      "breakpoints": true
     }
   ]
 }

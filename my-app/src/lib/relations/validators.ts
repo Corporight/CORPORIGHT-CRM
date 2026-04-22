@@ -14,17 +14,9 @@ export const createRelationSchema = z.object({
   validFrom: z.string().optional(),
   // Soft reference to the order that triggered this relation, if any.
   triggeredByOrderId: z.string().uuid().optional(),
-  // Key-value attributes specific to the relation type.
-  // SHAREHOLDER: [{ key: 'share_percentage', value: '50.00' }]
-  // DIRECTOR:    [{ key: 'acting_mode', value: 'SOLE' }]
-  attributes: z
-    .array(
-      z.object({
-        key: z.string().min(1),
-        value: z.string(),
-      }),
-    )
-    .optional(),
+  // Ownership stake — required for SHAREHOLDER relations, optional elsewhere.
+  sharePercentage: z.number().min(0).max(100).optional(),
+  noteInternal: z.string().optional(),
   createdBy: z.string().uuid().optional(),
 })
 

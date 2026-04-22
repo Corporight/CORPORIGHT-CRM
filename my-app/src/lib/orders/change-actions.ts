@@ -445,18 +445,16 @@ export async function applyOrderChangeActionsForOrder(
             })
 
             // Create the acquirer's new SHAREHOLDER relation.
-            const attributes = newParsed.data.sharePercentage
-              ? [{ key: 'share_percentage', value: newParsed.data.sharePercentage }]
-              : []
-
             resultingRelationId = await createRelationInTx(tx, {
               subjectAId: newParsed.data.subjectId,  // acquirer
               subjectBId: action.targetSubjectId,     // company
               relationType: 'SHAREHOLDER',
               validFrom: now.toISOString(),
+              sharePercentage: newParsed.data.sharePercentage != null
+                ? parseFloat(newParsed.data.sharePercentage)
+                : null,
               triggeredByOrderId: orderId,
               createdBy: appliedBy ?? null,
-              attributes,
             })
 
           // ── Documented-only actions (no relation mutation) ───────────

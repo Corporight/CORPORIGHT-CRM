@@ -34,6 +34,7 @@ import {
   uuid,
   text,
   boolean,
+  numeric,
   timestamp,
   jsonb,
   uniqueIndex,
@@ -104,6 +105,9 @@ export function validateRelationParticipants(
 // isActive: authoritative soft-delete flag (see active-state rule above).
 // validFrom / validTo: optional timestamps recording legal validity bounds.
 //   validTo must be >= validFrom when both are set (enforced by CHECK).
+// sharePercentage: ownership stake, applicable to SHAREHOLDER relations.
+//   Must be in [0, 100] when present (enforced by CHECK).
+// noteInternal: free-text internal note, not exposed to clients.
 export const relations = pgTable(
   'relations',
   {
@@ -121,6 +125,8 @@ export const relations = pgTable(
     validTo: timestamp('valid_to', { withTimezone: true }),
     // Authoritative active flag. See active-state rule at top of file.
     isActive: boolean('is_active').notNull().default(true),
+    sharePercentage: numeric('share_percentage', { precision: 5, scale: 2 }),
+    noteInternal: text('note_internal'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     // updatedAt: must be set explicitly on every UPDATE — not auto-maintained by DB.
     updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
@@ -138,37 +144,20 @@ export const relations = pgTable(
       'relations_validity_range',
       sql`${table.validFrom} IS NULL OR ${table.validTo} IS NULL OR ${table.validTo} >= ${table.validFrom}`,
     ),
+    // share_percentage must be between 0 and 100 when present.
+    check(
+      'relations_share_percentage_range',
+      sql`${table.sharePercentage} IS NULL OR (${table.sharePercentage} >= 0 AND ${table.sharePercentage} <= 100)`,
+    ),
+    // Only one active relation of the same type between the same subject pair.
+    // Historical (isActive=false) rows are excluded — enabling the append-only pattern.
+    uniqueIndex('uq_active_relation')
+      .on(table.subjectAId, table.subjectBId, table.relationType)
+      .where(sql`${table.isActive} = true`),
     index('idx_relations_subject_a').on(table.subjectAId),
     index('idx_relations_subject_b').on(table.subjectBId),
     // relation_type is included in most filtering queries (e.g. "all directors of company X").
     index('idx_relations_type').on(table.relationType),
-  ],
-)
-
-// ── relation_attributes ────────────────────────────────────────────
-// Key-value metadata scoped to a relation, varying by relation type.
-//
-// Examples:
-//   SHAREHOLDER → { key: 'share_percentage', value: '33.33' }
-//   DIRECTOR    → { key: 'acting_mode', value: 'SOLE' | 'JOINT' }
-//
-// Deliberately kept as text key-value pairs rather than typed columns,
-// because the attribute set differs per relation type and may grow.
-// Each key is unique within a relation (enforced by unique index).
-export const relationAttributes = pgTable(
-  'relation_attributes',
-  {
-    id: uuid('id').primaryKey().default(sql`gen_random_uuid()`),
-    relationId: uuid('relation_id')
-      .notNull()
-      .references(() => relations.id, { onDelete: 'cascade' }),
-    key: text('key').notNull(),
-    value: text('value').notNull(),
-    createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
-  },
-  (table) => [
-    // Only one value per key per relation.
-    uniqueIndex('uq_relation_attribute_key').on(table.relationId, table.key),
   ],
 )
 
@@ -177,8 +166,10 @@ export const relationAttributes = pgTable(
 // INSERT-only — never UPDATE or DELETE.
 //
 // eventType:
-//   'CREATED'    — a new relation row was inserted
-//   'TERMINATED' — an existing relation was deactivated (isActive=false, validTo set)
+//   'CREATED'     — a new relation row was inserted
+//   'TERMINATED'  — an existing relation was deactivated (isActive=false, validTo set)
+//   'UPDATED'     — sharePercentage or noteInternal was changed on an active relation
+//   'REACTIVATED' — a previously terminated relation was restored (isActive=true)
 //
 // triggeredByOrderId: plain UUID reference to the order that caused this change.
 //   No FK constraint here — this keeps the relations module independent of
@@ -187,7 +178,7 @@ export const relationAttributes = pgTable(
 //
 // snapshot: point-in-time JSON copy of the relevant state at the moment of the event.
 //   Immutable — do not update snapshot after insert.
-export const RELATION_EVENT_TYPES = ['CREATED', 'TERMINATED'] as const
+export const RELATION_EVENT_TYPES = ['CREATED', 'TERMINATED', 'UPDATED', 'REACTIVATED'] as const
 export type RelationEventType = (typeof RELATION_EVENT_TYPES)[number]
 
 export const relationEvents = pgTable(
@@ -213,7 +204,7 @@ export const relationEvents = pgTable(
   (table) => [
     check(
       'relation_events_type_check',
-      sql`${table.eventType} IN ('CREATED', 'TERMINATED')`,
+      sql`${table.eventType} IN ('CREATED', 'TERMINATED', 'UPDATED', 'REACTIVATED')`,
     ),
     index('idx_relation_events_relation').on(table.relationId),
   ],
@@ -222,6 +213,5 @@ export const relationEvents = pgTable(
 // ── TypeScript types ───────────────────────────────────────────────
 export type Relation = typeof relations.$inferSelect
 export type NewRelation = typeof relations.$inferInsert
-export type RelationAttribute = typeof relationAttributes.$inferSelect
 export type RelationEvent = typeof relationEvents.$inferSelect
 export type NewRelationEvent = typeof relationEvents.$inferInsert

@@ -38,7 +38,7 @@ export const addOrderParticipantSchema = z
     futureSubjectId: z.string().uuid().optional(),
     roleCode: z.string().min(1, 'Role code is required'),
     sharePercentage: z.number().min(0).max(100).optional(),
-    participantContextType: z.string().optional(),
+    participantContextType: z.enum(['STANDARD', 'APPOINTED', 'REMOVED', 'TRANSFEROR', 'ACQUIRER', 'SIGNER']).optional(),
     notes: z.string().optional(),
   })
   .refine(

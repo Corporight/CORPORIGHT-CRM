@@ -214,7 +214,7 @@ export const orderParticipants = pgTable(
     roleCode: text('role_code').notNull(),
     sharePercentage: numeric('share_percentage', { precision: 5, scale: 2 }),
     // Business context within this order — why this participant is here.
-    // e.g. FOUNDER | TRANSFEROR | ACQUIRER | INCOMING_DIRECTOR | OUTGOING_DIRECTOR
+    // e.g. STANDARD | APPOINTED | REMOVED | TRANSFEROR | ACQUIRER | SIGNER
     participantContextType: text('participant_context_type'),
     notes: text('notes'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
