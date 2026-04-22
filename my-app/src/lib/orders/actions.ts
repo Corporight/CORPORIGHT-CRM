@@ -38,6 +38,7 @@ import {
   evaluateAmlForOrderCreation,
   evaluateAmlForOrderProgression,
 } from '@/lib/aml/enforcement'
+import { runCompletionHookInTx } from './completion'
 import type { OrderStatus } from '@/db/schema'
 
 // ── Result type ────────────────────────────────────────────────────
@@ -315,6 +316,10 @@ export async function updateOrderStatus(
         action: 'ORDER_STATUS_CHANGED',
         diff: { from: order.status, to: newStatus },
       })
+
+      if (newStatus === 'COMPLETED') {
+        await runCompletionHookInTx(tx, orderId, null, now)
+      }
 
       return rows
     })
