@@ -69,6 +69,8 @@ export const subjectPersonProfiles = pgTable('subject_person_profiles', {
     .references(() => subjects.id, { onDelete: 'cascade' }),
   firstName: text('first_name').notNull(),
   lastName: text('last_name').notNull(),
+  titleBefore: text('title_before'),
+  titleAfter: text('title_after'),
   birthDate: date('birth_date'),
   birthNumber: text('birth_number'), // rodné číslo or equivalent
   nationality: text('nationality'),
@@ -91,6 +93,7 @@ export const subjectCompanyProfiles = pgTable('subject_company_profiles', {
   companyName: text('company_name').notNull(),
   registrationNumber: text('registration_number').notNull().unique(), // IČO
   vatNumber: text('vat_number'),
+  vatPayer: boolean('vat_payer').notNull().default(false),
   legalForm: text('legal_form'),
   registrationDate: date('registration_date'),
   registrationCourt: text('registration_court'),
@@ -156,11 +159,25 @@ export const subjectRoles = pgTable(
     assignedBy: uuid('assigned_by').references(() => users.id, { onDelete: 'set null' }),
   },
   (table) => [
-    check('subject_roles_role_check', sql`${table.role} IN ('CLIENT', 'SUPPLIER')`),
+    check('subject_roles_role_check', sql`${table.role} IN ('CLIENT', 'SUPPLIER', 'PARTNER', 'OTHER')`),
     // A subject should not hold the same role twice
     uniqueIndex('uq_subject_role').on(table.subjectId, table.role),
   ],
 )
+
+// ── subject_settings ───────────────────────────────────────────────
+// 1:1 with subjects. Auto-created in the same transaction as the parent subject.
+// No UI in Phase 1. Fields will be extended as settings requirements emerge.
+export const subjectSettings = pgTable('subject_settings', {
+  subjectId: uuid('subject_id')
+    .primaryKey()
+    .references(() => subjects.id, { onDelete: 'cascade' }),
+  notificationsEmailEnabled: boolean('notifications_email_enabled').notNull().default(true),
+  notificationsSmsEnabled: boolean('notifications_sms_enabled').notNull().default(true),
+  preferredLanguage: text('preferred_language').notNull().default('cs'),
+  createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
+  updatedAt: timestamp('updated_at', { withTimezone: true }).notNull().defaultNow(),
+})
 
 // ── TypeScript types ───────────────────────────────────────────────
 export type Subject = typeof subjects.$inferSelect
@@ -169,3 +186,4 @@ export type SubjectPersonProfile = typeof subjectPersonProfiles.$inferSelect
 export type SubjectCompanyProfile = typeof subjectCompanyProfiles.$inferSelect
 export type SubjectAddress = typeof subjectAddresses.$inferSelect
 export type SubjectRole = typeof subjectRoles.$inferSelect
+export type SubjectSettings = typeof subjectSettings.$inferSelect

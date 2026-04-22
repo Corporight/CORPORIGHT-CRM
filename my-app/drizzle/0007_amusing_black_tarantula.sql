@@ -1,0 +1,2 @@
+ALTER TABLE "subject_roles" DROP CONSTRAINT "subject_roles_role_check";--> statement-breakpoint
+ALTER TABLE "subject_roles" ADD CONSTRAINT "subject_roles_role_check" CHECK ("subject_roles"."role" IN ('CLIENT', 'SUPPLIER', 'PARTNER', 'OTHER'));
