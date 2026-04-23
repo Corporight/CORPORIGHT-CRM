@@ -25,6 +25,16 @@ export type CreateRelationInput = z.input<typeof createRelationSchema>
 
 export const terminateRelationSchema = z.object({
   relationId: z.string().uuid(),
+  reason: z.string().trim().min(1, 'Reason is required'),
+  // ISO date string (YYYY-MM-DD or full ISO). Empty string normalised to undefined.
+  // If omitted, the action defaults to the current timestamp.
+  validTo: z.preprocess(
+    (v) => (v === '' ? undefined : v),
+    z
+      .string()
+      .refine((s) => !isNaN(new Date(s).getTime()), 'validTo must be a valid date')
+      .optional(),
+  ),
   triggeredByOrderId: z.string().uuid().optional(),
   terminatedBy: z.string().uuid().optional(),
 })

@@ -186,6 +186,8 @@ export async function terminateRelationInTx(
   tx: DbTx,
   input: {
     relationId: string
+    reason?: string | null
+    validTo?: Date | null
     triggeredByOrderId?: string | null
     terminatedBy?: string | null
   },
@@ -206,12 +208,22 @@ export async function terminateRelationInTx(
   }
 
   const now = new Date()
+  const terminalDate = input.validTo ?? now
+
+  // validTo must not precede validFrom.
+  if (input.validTo && existing[0].validFrom && input.validTo < existing[0].validFrom) {
+    throw new Error(
+      `Termination date (${input.validTo.toISOString().slice(0, 10)}) cannot be ` +
+        `earlier than the relation's valid-from date ` +
+        `(${existing[0].validFrom.toISOString().slice(0, 10)}).`,
+    )
+  }
 
   await tx
     .update(relationsTable)
     .set({
       isActive: false,
-      validTo: now,
+      validTo: terminalDate,
       updatedAt: now,
     })
     .where(eq(relationsTable.id, input.relationId))
@@ -222,7 +234,8 @@ export async function terminateRelationInTx(
     eventType: 'TERMINATED',
     triggeredByOrderId: input.triggeredByOrderId ?? null,
     snapshot: {
-      terminatedAt: now.toISOString(),
+      terminatedAt: terminalDate.toISOString(),
+      reason: input.reason ?? null,
       previousState: {
         subjectAId: existing[0].subjectAId,
         subjectBId: existing[0].subjectBId,
@@ -240,7 +253,8 @@ export async function terminateRelationInTx(
     entityId: input.relationId,
     action: 'RELATION_TERMINATED',
     diff: {
-      terminatedAt: now.toISOString(),
+      terminatedAt: terminalDate.toISOString(),
+      reason: input.reason ?? null,
       triggeredByOrderId: input.triggeredByOrderId ?? null,
     },
     userId: input.terminatedBy ?? null,
@@ -295,6 +309,8 @@ export async function terminateRelation(
     const id = await db.transaction(async (tx) =>
       terminateRelationInTx(tx, {
         relationId: parsed.data.relationId,
+        reason: parsed.data.reason,
+        validTo: parsed.data.validTo ? new Date(parsed.data.validTo) : null,
         triggeredByOrderId: parsed.data.triggeredByOrderId ?? null,
         terminatedBy: parsed.data.terminatedBy ?? null,
       }),
