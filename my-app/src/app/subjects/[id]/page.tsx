@@ -1,6 +1,7 @@
 import Link from 'next/link'
 import { notFound } from 'next/navigation'
 import { getSubjectDetail } from '@/lib/subjects/actions'
+import { listRelationsForSubject } from '@/lib/relations/actions'
 
 type Params = Promise<{ id: string }>
 
@@ -34,6 +35,14 @@ const ADDRESS_TYPE_LABELS: Record<string, string> = {
   MAILING: 'Mailing',
   BILLING: 'Billing',
   OPERATIONAL: 'Operational',
+}
+
+const RELATION_TYPE_LABELS: Record<string, string> = {
+  SHAREHOLDER: 'Shareholder',
+  DIRECTOR: 'Director',
+  PROCURIST: 'Procurist',
+  BENEFICIAL_OWNER: 'Beneficial owner',
+  REPRESENTATIVE: 'Representative',
 }
 
 
@@ -78,6 +87,9 @@ export default async function SubjectDetailPage({ params }: { params: Params }) 
 
   const activeAddresses = addresses.filter(a => a.isActive)
   const activeRoles = roles.filter(r => r.isActive)
+
+  const relationsResult = await listRelationsForSubject({ subjectId: id })
+  const activeRelations = relationsResult.success ? relationsResult.data.items : []
 
   return (
     <div className="px-6 py-8 max-w-3xl mx-auto">
@@ -259,6 +271,79 @@ export default async function SubjectDetailPage({ params }: { params: Params }) 
             </div>
           </Section>
         )}
+
+        {/* Relations */}
+        <section>
+          <div className="flex items-center justify-between border-b border-gray-200 pb-1.5 mb-4">
+            <span className="text-xs font-semibold uppercase tracking-wider text-gray-400">
+              Relations
+            </span>
+            <div className="flex items-center gap-4">
+              <Link
+                href={`/relations?subjectId=${id}`}
+                className="text-xs text-gray-500 hover:text-gray-700"
+              >
+                View all
+              </Link>
+              <Link
+                href={`/relations/new?subjectAId=${id}`}
+                className="text-xs font-medium text-gray-900 hover:text-gray-600"
+              >
+                + Add
+              </Link>
+            </div>
+          </div>
+          {activeRelations.length === 0 ? (
+            <p className="text-sm text-gray-400">No active relations.</p>
+          ) : (
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="text-left">
+                  <th className="pb-2 pr-4 text-xs font-medium text-gray-400">Type</th>
+                  <th className="pb-2 pr-4 text-xs font-medium text-gray-400">Counterpart</th>
+                  <th className="pb-2 pr-4 text-xs font-medium text-gray-400">Share %</th>
+                  <th className="pb-2 text-xs font-medium text-gray-400">Since</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {activeRelations.map((rel) => {
+                  const isA = rel.subjectAId === id
+                  const counterpartId = isA ? rel.subjectBId : rel.subjectAId
+                  const counterpartName = isA ? rel.subjectBName : rel.subjectAName
+                  return (
+                    <tr key={rel.id}>
+                      <td className="py-2 pr-4">
+                        <Link href={`/relations/${rel.id}`}>
+                          <span className="inline-block px-2 py-0.5 rounded text-xs font-medium bg-gray-100 text-gray-700 hover:bg-gray-200 transition-colors">
+                            {RELATION_TYPE_LABELS[rel.relationType] ?? rel.relationType}
+                          </span>
+                        </Link>
+                      </td>
+                      <td className="py-2 pr-4">
+                        <Link
+                          href={`/subjects/${counterpartId}`}
+                          className="text-gray-900 hover:text-blue-600"
+                        >
+                          {counterpartName}
+                        </Link>
+                      </td>
+                      <td className="py-2 pr-4 font-mono text-xs text-gray-600">
+                        {rel.sharePercentage != null ? (
+                          `${rel.sharePercentage}%`
+                        ) : (
+                          <span className="text-gray-300">—</span>
+                        )}
+                      </td>
+                      <td className="py-2 text-gray-500 whitespace-nowrap">
+                        {fmtTimestamp(rel.validFrom) ?? '—'}
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          )}
+        </section>
 
         {/* Metadata */}
         <p className="text-xs text-gray-400 pt-2 border-t border-gray-100">
