@@ -1,0 +1,2 @@
+ALTER TABLE "order_change_actions" ADD COLUMN "share_percentage" numeric(5, 2);--> statement-breakpoint
+ALTER TABLE "order_change_actions" ADD CONSTRAINT "order_change_actions_share_percentage_range" CHECK ("order_change_actions"."share_percentage" IS NULL OR ("order_change_actions"."share_percentage" >= 0 AND "order_change_actions"."share_percentage" <= 100));

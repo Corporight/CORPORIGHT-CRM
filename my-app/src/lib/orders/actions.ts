@@ -18,7 +18,6 @@ import {
   orderItems,
   orderParticipants,
   futureSubjects,
-  orderChangeActions,
   companiesForSale,
   subjects,
   auditLog,
@@ -270,28 +269,8 @@ export async function updateOrderStatus(
       }
     }
 
-    // Guard 2: all order_change_actions must be APPLIED or CANCELLED.
-    // A PENDING action means a legal mutation (director appointment, share transfer, etc.)
-    // has been recorded as intended but not yet executed against the relations table.
-    const pendingActions = await db
-      .select({ id: orderChangeActions.id, actionType: orderChangeActions.actionType })
-      .from(orderChangeActions)
-      .where(
-        and(
-          eq(orderChangeActions.orderId, orderId),
-          eq(orderChangeActions.status, 'PENDING'),
-        ),
-      )
-
-    if (pendingActions.length > 0) {
-      const types = pendingActions.map((a) => a.actionType).join(', ')
-      return {
-        success: false,
-        error:
-          `Cannot complete order: ${pendingActions.length} change action(s) are still PENDING: ` +
-          `${types}. Apply or cancel them first via applyOrderChangeActionsForOrder().`,
-      }
-    }
+    // Guard 2 removed (Relations Phase 2A): PENDING change actions are now applied
+    // automatically inside the completion transaction by applyOrderChangeActionsToRelationsInTx.
   }
 
   try {

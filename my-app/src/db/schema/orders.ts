@@ -239,6 +239,8 @@ export const orderParticipants = pgTable(
 // Describes a concrete legal mutation intended by the order.
 //
 // old_value / new_value: JSONB snapshots of the state before and after.
+// share_percentage: canonical source for the transferred ownership share on
+//   SHARE_TRANSFER actions. Must be set by the operator before order completion.
 // resulting_relation_id: FK → relations.id, filled when the action is applied
 //   and a relation is created or terminated as a result.
 export const orderChangeActions = pgTable(
@@ -254,6 +256,9 @@ export const orderChangeActions = pgTable(
     }),
     oldValue: jsonb('old_value'),
     newValue: jsonb('new_value'),
+    // Canonical transferred share amount for SHARE_TRANSFER actions.
+    // Validated at apply time: must be present and in range [0, 100].
+    sharePercentage: numeric('share_percentage', { precision: 5, scale: 2 }),
     status: text('status').notNull().default('PENDING'),
     appliedAt: timestamp('applied_at', { withTimezone: true }),
     // FK to relations.id — now that the Relations module is implemented.
@@ -275,6 +280,10 @@ export const orderChangeActions = pgTable(
     check(
       'order_change_actions_status_check',
       sql`${table.status} IN (${sql.raw(CHANGE_ACTION_STATUSES.map((s) => `'${s}'`).join(', '))})`,
+    ),
+    check(
+      'order_change_actions_share_percentage_range',
+      sql`${table.sharePercentage} IS NULL OR (${table.sharePercentage} >= 0 AND ${table.sharePercentage} <= 100)`,
     ),
     index('idx_order_change_actions_order').on(table.orderId),
   ],

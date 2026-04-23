@@ -27,7 +27,7 @@ export function TerminateForm({
       const result = await terminateRelation({
         relationId,
         reason,
-        ...(validTo ? { validTo } : {}),
+        validTo, // preprocess normalises '' → undefined
       })
       if (result.success) {
         setOpen(false)

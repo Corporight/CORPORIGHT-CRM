@@ -59,7 +59,7 @@ type DbTx = Parameters<Parameters<typeof db.transaction>[0]>[0]
 // Inserts the relation row + a CREATED relation_event + audit_log.
 // Returns the new relation ID, or throws on validation / constraint error.
 //
-// Callers: createRelation (wraps in its own tx), applyOrderChangeActionsForOrder.
+// Callers: createRelation (wraps in its own tx), applyOrderChangeActionsToRelationsInTx (completion.ts).
 
 export async function createRelationInTx(
   tx: DbTx,
@@ -180,7 +180,7 @@ export async function createRelationInTx(
 // then inserts a TERMINATED relation_event + audit_log.
 // Returns the relation ID, or throws if not found / already inactive.
 //
-// Callers: terminateRelation (wraps in its own tx), applyOrderChangeActionsForOrder.
+// Callers: terminateRelation (wraps in its own tx), applyOrderChangeActionsToRelationsInTx (completion.ts).
 
 export async function terminateRelationInTx(
   tx: DbTx,

@@ -60,12 +60,11 @@ export function CreateRelationForm({ subjectAId }: { subjectAId?: string }) {
 
     const subjectAIdValue = val('subjectAId').trim()
     const subjectBIdValue = val('subjectBId').trim()
-    const relationType = val('relationType')
+    const relationType = val('relationType') as (typeof RELATION_TYPES)[number]
     const validFrom = val('validFrom') || undefined
     const shareRaw = val('sharePercentage').trim()
-    const noteRaw = val('noteInternal').trim()
     const sharePercentage = shareRaw === '' ? undefined : parseFloat(shareRaw)
-    const noteInternal = noteRaw === '' ? undefined : noteRaw
+    const noteInternal = val('noteInternal') // preprocess normalises '' → null
 
     setError(null)
     startTransition(async () => {
@@ -75,7 +74,7 @@ export function CreateRelationForm({ subjectAId }: { subjectAId?: string }) {
         relationType,
         ...(validFrom !== undefined ? { validFrom } : {}),
         ...(sharePercentage !== undefined ? { sharePercentage } : {}),
-        ...(noteInternal !== undefined ? { noteInternal } : {}),
+        noteInternal, // always pass — preprocess normalises '' → null
       })
       if (result.success) {
         router.push(`/relations/${result.data.id}`)
