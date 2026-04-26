@@ -4,6 +4,8 @@ import { useState, useTransition } from 'react'
 import { useRouter } from 'next/navigation'
 import { createRelation } from '@/lib/relations/actions'
 import { RELATION_TYPES } from '@/db/schema'
+import { SubjectPicker } from '@/components/subject-picker'
+import type { SubjectSearchResult } from '@/lib/subjects/search'
 
 const INPUT =
   'border border-gray-300 rounded-md px-3 py-2 text-sm w-full focus:outline-none focus:ring-2 focus:ring-gray-400 disabled:bg-gray-50 disabled:text-gray-400'
@@ -42,7 +44,7 @@ const RELATION_TYPE_LABELS: Record<string, string> = {
   REPRESENTATIVE: 'Representative',
 }
 
-export function CreateRelationForm({ subjectAId }: { subjectAId?: string }) {
+export function CreateRelationForm({ defaultSubjectA }: { defaultSubjectA?: SubjectSearchResult }) {
   const [error, setError] = useState<string | null>(null)
   const [isPending, startTransition] = useTransition()
   const router = useRouter()
@@ -86,34 +88,20 @@ export function CreateRelationForm({ subjectAId }: { subjectAId?: string }) {
 
   return (
     <form onSubmit={handleSubmit} className="space-y-5">
-      <Field
-        label="Subject A (UUID)"
-        required
+      <SubjectPicker
+        name="subjectAId"
+        label="Subject A"
         hint="The acting side — e.g. the person who is a director or shareholder."
-      >
-        <input
-          type="text"
-          name="subjectAId"
-          defaultValue={subjectAId ?? ''}
-          required
-          placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-          className={INPUT}
-        />
-      </Field>
-
-      <Field
-        label="Subject B (UUID)"
+        defaultValue={defaultSubjectA}
         required
+      />
+
+      <SubjectPicker
+        name="subjectBId"
+        label="Subject B"
         hint="The target side — e.g. the company being directed."
-      >
-        <input
-          type="text"
-          name="subjectBId"
-          required
-          placeholder="xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx"
-          className={INPUT}
-        />
-      </Field>
+        required
+      />
 
       <Field label="Relation type" required>
         <select name="relationType" required defaultValue="" className={SELECT}>

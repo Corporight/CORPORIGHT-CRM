@@ -146,6 +146,7 @@ export async function createRelationInTx(
     relationId: relation.id,
     eventType: 'CREATED',
     triggeredByOrderId: input.triggeredByOrderId ?? null,
+    note: null,
     snapshot: {
       subjectAId: input.subjectAId,
       subjectBId: input.subjectBId,
@@ -233,6 +234,7 @@ export async function terminateRelationInTx(
     relationId: input.relationId,
     eventType: 'TERMINATED',
     triggeredByOrderId: input.triggeredByOrderId ?? null,
+    note: input.reason ?? null,
     snapshot: {
       terminatedAt: terminalDate.toISOString(),
       reason: input.reason ?? null,
@@ -451,6 +453,7 @@ export async function updateRelation(
       await tx.insert(relationEvents).values({
         relationId: parsed.data.relationId,
         eventType: 'UPDATED',
+        note: parsed.data.reason,
         snapshot: {
           reason: parsed.data.reason,
           before: {
@@ -541,6 +544,7 @@ export async function reactivateRelation(
       await tx.insert(relationEvents).values({
         relationId: parsed.data.relationId,
         eventType: 'REACTIVATED',
+        note: parsed.data.reason,
         snapshot: {
           reason: parsed.data.reason,
           reactivatedAt: now.toISOString(),
@@ -655,6 +659,7 @@ export async function listRelations(
 export type RelationEventSummary = {
   id: string
   eventType: string
+  note: string | null
   snapshot: unknown
   triggeredByOrderId: string | null
   createdAt: Date
@@ -719,6 +724,7 @@ export async function getRelationDetail(
       .select({
         id: relationEvents.id,
         eventType: relationEvents.eventType,
+        note: relationEvents.note,
         snapshot: relationEvents.snapshot,
         triggeredByOrderId: relationEvents.triggeredByOrderId,
         createdAt: relationEvents.createdAt,

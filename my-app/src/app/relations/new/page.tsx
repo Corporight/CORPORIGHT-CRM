@@ -1,5 +1,6 @@
 import Link from 'next/link'
 import { CreateRelationForm } from './_components/create-relation-form'
+import { getSubjectSummary } from '@/lib/subjects/search'
 
 type SearchParams = Promise<{ [key: string]: string | string[] | undefined }>
 
@@ -14,6 +15,8 @@ export default async function NewRelationPage({
   const raw = typeof sp.subjectAId === 'string' ? sp.subjectAId : undefined
   const subjectAId = raw && UUID_RE.test(raw) ? raw : undefined
 
+  const defaultSubjectA = subjectAId ? await getSubjectSummary(subjectAId) : null
+
   return (
     <div className="px-6 py-8 max-w-2xl mx-auto">
       <div className="flex items-center gap-3 mb-8">
@@ -23,7 +26,7 @@ export default async function NewRelationPage({
         <span className="text-gray-300">/</span>
         <h1 className="text-xl font-semibold text-gray-900">New relation</h1>
       </div>
-      <CreateRelationForm subjectAId={subjectAId} />
+      <CreateRelationForm defaultSubjectA={defaultSubjectA ?? undefined} />
     </div>
   )
 }

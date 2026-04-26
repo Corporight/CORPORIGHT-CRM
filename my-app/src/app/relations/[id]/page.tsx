@@ -101,9 +101,6 @@ function EventSnapshot({ event }: { event: RelationEventSummary }) {
         {s.terminatedAt != null && (
           <li>Terminated: {fmtDateStr(s.terminatedAt as string)}</li>
         )}
-        {s.reason != null && s.reason !== '' && (
-          <li>Reason: {String(s.reason)}</li>
-        )}
       </ul>
     )
   }
@@ -116,9 +113,6 @@ function EventSnapshot({ event }: { event: RelationEventSummary }) {
 
     return (
       <ul className="text-xs text-gray-600 space-y-0.5">
-        {s.reason != null && s.reason !== '' && (
-          <li>Reason: {String(s.reason)}</li>
-        )}
         {shareChanged && before && after && (
           <li>
             Share:{' '}
@@ -146,9 +140,6 @@ function EventSnapshot({ event }: { event: RelationEventSummary }) {
   if (event.eventType === 'REACTIVATED') {
     return (
       <ul className="text-xs text-gray-600 space-y-0.5">
-        {s.reason != null && s.reason !== '' && (
-          <li>Reason: {String(s.reason)}</li>
-        )}
         {s.previousValidTo != null && (
           <li>Previously ended: {fmtDateStr(s.previousValidTo as string)}</li>
         )}
@@ -285,6 +276,9 @@ export default async function RelationDetailPage({ params }: { params: Params })
                       </Link>
                     )}
                   </div>
+                  {event.note && (
+                    <p className="mt-1 text-sm text-gray-600">{event.note}</p>
+                  )}
                   <EventSnapshot event={event} />
                 </li>
               ))}

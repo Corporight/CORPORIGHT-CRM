@@ -198,6 +198,7 @@ export const relationEvents = pgTable(
     triggeredByOrderId: uuid('triggered_by_order_id'),
     // Point-in-time snapshot of the relation state at event time.
     snapshot: jsonb('snapshot').notNull().default(sql`'{}'::jsonb`),
+    note: text('note'),
     createdAt: timestamp('created_at', { withTimezone: true }).notNull().defaultNow(),
     createdBy: uuid('created_by').references(() => users.id, { onDelete: 'set null' }),
   },

@@ -1,0 +1,1 @@
+ALTER TABLE "relation_events" ADD COLUMN "note" text;
