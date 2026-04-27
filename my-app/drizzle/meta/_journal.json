@@ -85,6 +85,13 @@
       "when": 1777188995096,
       "tag": "0011_familiar_caretaker",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "7",
+      "when": 1777274521888,
+      "tag": "0012_add_finance_module",
+      "breakpoints": true
     }
   ]
 }
