@@ -14,7 +14,9 @@
 //   - Order payment status is computed from allocations — not stored on orders
 //
 // Spec inconsistencies documented:
-//   - direction BOTH (seen in CORRECTION seed data) is not in vocabulary; use INTERNAL
+//   - financial_tree_categories uses FINANCIAL_TREE_CATEGORY_DIRECTIONS (INCOME/EXPENSE/INTERNAL/BOTH);
+//     payment_groups and financial_movements use FINANCE_DIRECTIONS (INCOME/EXPENSE/INTERNAL only) —
+//     BOTH must not be used on movements or payment groups
 //   - processing_status: spec says NEW in entity definition, UNALLOCATED in prose;
 //     this schema uses NEW as the initial status
 //   - amount_gross = amount_net + vat_amount: enforced at app layer only (Zod + service)
@@ -47,6 +49,13 @@ import { orderItems } from './orders'
 
 export const FINANCE_DIRECTIONS = ['INCOME', 'EXPENSE', 'INTERNAL'] as const
 export type FinanceDirection = (typeof FINANCE_DIRECTIONS)[number]
+
+// Superset of FINANCE_DIRECTIONS — categories allow BOTH to classify correction documents
+// that span income and expense. BOTH is NOT valid for movements or payment groups.
+export const FINANCIAL_TREE_CATEGORY_DIRECTIONS = [
+  'INCOME', 'EXPENSE', 'INTERNAL', 'BOTH',
+] as const
+export type FinancialTreeCategoryDirection = (typeof FINANCIAL_TREE_CATEGORY_DIRECTIONS)[number]
 
 export const PAYMENT_GROUP_PROCESSING_STATUSES = [
   'NEW',
@@ -103,7 +112,7 @@ export const financialTreeCategories = pgTable(
   (table) => [
     check(
       'ftc_direction_check',
-      sql`${table.direction} IN ('INCOME', 'EXPENSE', 'INTERNAL')`,
+      sql`${table.direction} IN (${sql.raw(FINANCIAL_TREE_CATEGORY_DIRECTIONS.map((d) => `'${d}'`).join(', '))})`,
     ),
   ],
 )

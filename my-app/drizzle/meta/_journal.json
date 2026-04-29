@@ -92,6 +92,20 @@
       "when": 1777274521888,
       "tag": "0012_add_finance_module",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "7",
+      "when": 1777507200000,
+      "tag": "0013_fix_ftc_direction",
+      "breakpoints": true
+    },
+    {
+      "idx": 14,
+      "version": "7",
+      "when": 1777507260000,
+      "tag": "0014_seed_finance_dictionaries",
+      "breakpoints": true
     }
   ]
 }
