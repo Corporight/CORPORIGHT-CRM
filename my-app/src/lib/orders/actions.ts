@@ -21,8 +21,9 @@ import {
   companiesForSale,
   subjects,
   auditLog,
+  paymentAllocations,
 } from '@/db/schema'
-import { eq, ilike, and, isNull, sql } from 'drizzle-orm'
+import { eq, ilike, and, isNull, sql, desc } from 'drizzle-orm'
 import {
   createOrderSchema,
   addOrderParticipantSchema,
@@ -38,6 +39,7 @@ import {
   evaluateAmlForOrderProgression,
 } from '@/lib/aml/enforcement'
 import { runCompletionHookInTx } from './completion'
+import { computeOrderPaymentStatus, type PaymentStatus } from '@/lib/finance/helpers'
 import type { OrderStatus } from '@/db/schema'
 
 // ── Result type ────────────────────────────────────────────────────
@@ -404,10 +406,12 @@ export type OrderListItem = {
   orderType: string
   status: string
   clientSubjectId: string | null
+  clientDisplayName: string | null
   assignedTo: string | null
   dueDate: string | null
   confirmedAt: Date | null
   createdAt: Date
+  paymentStatus: PaymentStatus
 }
 
 export async function listOrders(
@@ -431,7 +435,7 @@ export async function listOrders(
   const where = conditions.length > 0 ? and(...conditions) : undefined
 
   try {
-    const [items, countRows] = await Promise.all([
+    const [rawItems, countRows] = await Promise.all([
       db
         .select({
           id: orders.id,
@@ -439,14 +443,27 @@ export async function listOrders(
           orderType: orders.orderType,
           status: orders.status,
           clientSubjectId: orders.clientSubjectId,
+          clientDisplayName: subjects.displayName,
           assignedTo: orders.assignedTo,
           dueDate: orders.dueDate,
           confirmedAt: orders.confirmedAt,
           createdAt: orders.createdAt,
+          allocatedPayments: sql<string>`(
+            select coalesce(sum(${paymentAllocations.allocatedAmount})::text, '0')
+            from ${paymentAllocations}
+            where ${paymentAllocations.orderId} = ${orders.id}
+              and ${paymentAllocations.status} = 'ACTIVE'
+          )`,
+          orderTotal: sql<string>`(
+            select coalesce(sum(${orderItems.totalPrice})::text, '0')
+            from ${orderItems}
+            where ${orderItems.orderId} = ${orders.id}
+          )`,
         })
         .from(orders)
+        .leftJoin(subjects, eq(orders.clientSubjectId, subjects.id))
         .where(where)
-        .orderBy(orders.createdAt)
+        .orderBy(desc(orders.createdAt))
         .limit(limit)
         .offset(offset),
 
@@ -455,6 +472,11 @@ export async function listOrders(
         .from(orders)
         .where(where),
     ])
+
+    const items: OrderListItem[] = rawItems.map(({ allocatedPayments, orderTotal, ...rest }) => ({
+      ...rest,
+      paymentStatus: computeOrderPaymentStatus(allocatedPayments, orderTotal),
+    }))
 
     return { success: true, data: { items, total: countRows[0].count } }
   } catch (err) {

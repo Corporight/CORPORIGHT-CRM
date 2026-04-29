@@ -8,6 +8,7 @@ import {
   TableRow,
 } from '@/components/ui/table'
 import { formatCZK } from '@/lib/format'
+import { VAT_MODE_LABELS } from '@/lib/finance/labels'
 
 export async function OrderFinanceExpensesTab({ orderId }: { orderId: string }) {
   const result = await listFinancialMovements({ orderId, direction: 'EXPENSE' })
@@ -20,6 +21,12 @@ export async function OrderFinanceExpensesTab({ orderId }: { orderId: string }) 
 
   const { items } = result.data
 
+  const totalCents = items.reduce(
+    (sum, m) => sum + Math.round(parseFloat(m.amountGross) * 100),
+    0,
+  )
+  const totalFormatted = (totalCents / 100).toFixed(2)
+
   return (
     <div>
       <h2 className="text-base font-semibold mb-4">Výdaje</h2>
@@ -28,36 +35,44 @@ export async function OrderFinanceExpensesTab({ orderId }: { orderId: string }) 
           Žádné výdaje k této objednávce.
         </p>
       ) : (
-        <Table>
-          <TableHeader>
-            <TableRow>
-              <TableHead>Datum</TableHead>
-              <TableHead>Popis</TableHead>
-              <TableHead>Hrubá částka</TableHead>
-              <TableHead>Režim DPH</TableHead>
-              <TableHead>Platební skupina</TableHead>
-            </TableRow>
-          </TableHeader>
-          <TableBody>
-            {items.map((movement) => (
-              <TableRow key={movement.id}>
-                <TableCell className="text-sm">{movement.movementDate}</TableCell>
-                <TableCell className="text-sm">{movement.description}</TableCell>
-                <TableCell className="font-medium">
-                  {formatCZK(movement.amountGross)}
-                </TableCell>
-                <TableCell className="text-sm text-muted-foreground">
-                  {movement.vatMode}
-                </TableCell>
-                <TableCell className="font-mono text-xs text-muted-foreground">
-                  {movement.paymentGroupId
-                    ? `${movement.paymentGroupId.slice(0, 8)}…`
-                    : '—'}
-                </TableCell>
+        <>
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Datum</TableHead>
+                <TableHead>Popis</TableHead>
+                <TableHead>Hrubá částka</TableHead>
+                <TableHead>Režim DPH</TableHead>
+                <TableHead>Platební skupina</TableHead>
               </TableRow>
-            ))}
-          </TableBody>
-        </Table>
+            </TableHeader>
+            <TableBody>
+              {items.map((movement) => (
+                <TableRow key={movement.id}>
+                  <TableCell className="text-sm">{movement.movementDate}</TableCell>
+                  <TableCell className="text-sm">{movement.description}</TableCell>
+                  <TableCell className="font-medium">
+                    {formatCZK(movement.amountGross)}
+                  </TableCell>
+                  <TableCell className="text-sm text-muted-foreground">
+                    {VAT_MODE_LABELS[movement.vatMode as keyof typeof VAT_MODE_LABELS] ?? movement.vatMode}
+                  </TableCell>
+                  <TableCell className="font-mono text-xs text-muted-foreground">
+                    {movement.paymentGroupId
+                      ? `${movement.paymentGroupId.slice(0, 8)}…`
+                      : '—'}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+          <div className="mt-3 flex justify-end border-t pt-3">
+            <p className="text-sm text-muted-foreground">
+              Celkem výdaje:{' '}
+              <span className="font-semibold text-gray-900">{formatCZK(totalFormatted)}</span>
+            </p>
+          </div>
+        </>
       )}
     </div>
   )
