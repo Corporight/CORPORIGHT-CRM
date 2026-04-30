@@ -7,9 +7,9 @@
 //           createFinancialTreeType, createFinancialTreeDetail
 //   Core:   createPaymentGroup, createFinancialMovement,
 //           createPaymentAllocation, cancelPaymentAllocation
-//   Reads:  listPaymentGroups, listFinancialMovements,
+//   Reads:  listCenters, listPaymentGroups, listFinancialMovements,
 //           listAllocationsForOrder, getOrderPaymentStatus,
-//           getOrderEconomics
+//           getOrderEconomics, getPaymentGroupDetail
 //
 // Order payment status is COMPUTED from payment_allocations — never stored
 // on the orders table. See helpers.ts for computation logic.
@@ -94,6 +94,41 @@ export async function createCenter(
     if (message.includes('centers_code_unique')) {
       return { success: false, error: `A center with code '${code}' already exists.` }
     }
+    return { success: false, error: message }
+  }
+}
+
+// ── listCenters ────────────────────────────────────────────────────
+
+export type CenterListItem = {
+  id: string
+  code: string
+  name: string
+  isActive: boolean
+  sortOrder: number
+}
+
+export async function listCenters(
+  input: { activeOnly?: boolean } = {},
+): Promise<ActionResult<{ items: CenterListItem[] }>> {
+  const activeOnly = input.activeOnly ?? true
+
+  try {
+    const rows = await db
+      .select({
+        id: centers.id,
+        code: centers.code,
+        name: centers.name,
+        isActive: centers.isActive,
+        sortOrder: centers.sortOrder,
+      })
+      .from(centers)
+      .where(activeOnly ? eq(centers.isActive, true) : undefined)
+      .orderBy(centers.sortOrder, centers.name)
+
+    return { success: true, data: { items: rows as CenterListItem[] } }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Unknown error'
     return { success: false, error: message }
   }
 }
@@ -949,6 +984,146 @@ export async function getOrderEconomics(
     const paymentStatus = computeOrderPaymentStatus(allocatedPayments, orderTotal)
 
     return { success: true, data: { allocatedPayments, expenseTotal, actualProfit, paymentStatus, orderTotal } }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Unknown error'
+    return { success: false, error: message }
+  }
+}
+
+// ── getPaymentGroupDetail ──────────────────────────────────────────
+
+export type PaymentGroupMovementItem = {
+  id: string
+  direction: string
+  amountGross: string
+  amountNet: string
+  vatAmount: string
+  vatMode: string
+  description: string
+  movementDate: string
+  createdAt: Date
+}
+
+export type PaymentGroupAllocationItem = {
+  id: string
+  orderId: string
+  allocatedAmount: string
+  status: string
+  cancelledAt: Date | null
+  note: string | null
+  createdAt: Date
+}
+
+export type PaymentGroupDetail = {
+  // From payment_groups
+  id: string
+  centerId: string
+  centerCode: string
+  centerName: string
+  direction: string
+  totalAmount: string
+  allocatedAmount: string
+  processingStatus: string
+  currency: string
+  transactionDate: string
+  counterpartyName: string | null
+  counterpartyAccountNumber: string | null
+  counterpartyBankCode: string | null
+  variableSymbol: string | null
+  constantSymbol: string | null
+  specificSymbol: string | null
+  source: string
+  note: string | null
+  noteInternal: string | null
+  version: number
+  createdAt: Date
+  updatedAt: Date
+  // Nested
+  movements: PaymentGroupMovementItem[]
+  allocations: PaymentGroupAllocationItem[]
+}
+
+export async function getPaymentGroupDetail(
+  id: string,
+): Promise<ActionResult<PaymentGroupDetail>> {
+  if (!id || typeof id !== 'string') {
+    return { success: false, error: 'id is required.' }
+  }
+
+  try {
+    const [pg] = await db
+      .select({
+        id: paymentGroups.id,
+        centerId: paymentGroups.centerId,
+        centerCode: centers.code,
+        centerName: centers.name,
+        direction: paymentGroups.direction,
+        totalAmount: paymentGroups.totalAmount,
+        allocatedAmount: paymentGroups.allocatedAmount,
+        processingStatus: paymentGroups.processingStatus,
+        currency: paymentGroups.currency,
+        transactionDate: paymentGroups.transactionDate,
+        counterpartyName: paymentGroups.counterpartyName,
+        counterpartyAccountNumber: paymentGroups.counterpartyAccountNumber,
+        counterpartyBankCode: paymentGroups.counterpartyBankCode,
+        variableSymbol: paymentGroups.variableSymbol,
+        constantSymbol: paymentGroups.constantSymbol,
+        specificSymbol: paymentGroups.specificSymbol,
+        source: paymentGroups.source,
+        note: paymentGroups.note,
+        noteInternal: paymentGroups.noteInternal,
+        version: paymentGroups.version,
+        createdAt: paymentGroups.createdAt,
+        updatedAt: paymentGroups.updatedAt,
+      })
+      .from(paymentGroups)
+      .innerJoin(centers, eq(paymentGroups.centerId, centers.id))
+      .where(eq(paymentGroups.id, id))
+
+    if (!pg) {
+      return { success: false, error: `Payment group not found: ${id}` }
+    }
+
+    const [movements, allocations] = await Promise.all([
+      db
+        .select({
+          id: financialMovements.id,
+          direction: financialMovements.direction,
+          amountGross: financialMovements.amountGross,
+          amountNet: financialMovements.amountNet,
+          vatAmount: financialMovements.vatAmount,
+          vatMode: financialMovements.vatMode,
+          description: financialMovements.description,
+          movementDate: financialMovements.movementDate,
+          createdAt: financialMovements.createdAt,
+        })
+        .from(financialMovements)
+        .where(eq(financialMovements.paymentGroupId, id))
+        .orderBy(financialMovements.movementDate),
+
+      db
+        .select({
+          id: paymentAllocations.id,
+          orderId: paymentAllocations.orderId,
+          allocatedAmount: paymentAllocations.allocatedAmount,
+          status: paymentAllocations.status,
+          cancelledAt: paymentAllocations.cancelledAt,
+          note: paymentAllocations.note,
+          createdAt: paymentAllocations.createdAt,
+        })
+        .from(paymentAllocations)
+        .where(eq(paymentAllocations.paymentGroupId, id))
+        .orderBy(paymentAllocations.createdAt),
+    ])
+
+    return {
+      success: true,
+      data: {
+        ...pg,
+        movements: movements as PaymentGroupMovementItem[],
+        allocations: allocations as PaymentGroupAllocationItem[],
+      },
+    }
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error'
     return { success: false, error: message }
