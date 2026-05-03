@@ -176,7 +176,12 @@ export default async function PaymentGroupDetailPage({
 
         {/* Finanční pohyby */}
         <section>
-          <h2 className="text-sm font-semibold text-gray-700 mb-3">Finanční pohyby</h2>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-semibold text-gray-700">Finanční pohyby</h2>
+            <Link href={`/finance/payment-groups/${pg.id}/movements/new`} className="text-xs font-medium px-3 py-1 rounded-md bg-gray-900 text-white hover:bg-gray-700">
+              Přidat pohyb
+            </Link>
+          </div>
           {pg.movements.length === 0 ? (
             <p className="text-sm text-gray-400">Žádné pohyby.</p>
           ) : (

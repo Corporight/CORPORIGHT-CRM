@@ -1,113 +1,124 @@
-# CC Session 12.1 — Finance Standalone UI Foundation: PaymentGroups
-## Intended for immediate pasteback to ChatGPT
+# CC Session 12.2 — Implementation Report
 
----
+## Mission
 
-## Session Summary
+FinancialMovement creation inside PaymentGroups — standalone finance operator workflow.
 
-Implemented the first complete standalone Finance operator vertical: PaymentGroups
-create / list / detail. All tasks passed spec compliance review and code quality
-review (with fixes applied). TypeScript typecheck: zero errors.
+## Base commit
+
+`33a2b24` — CC Session 12.1: add standalone finance payment groups UI
 
 ---
 
 ## Changed Files
 
-| File | Change |
-|---|---|
-| `src/lib/finance/actions.ts` | Added `listCenters()` + `CenterListItem` type; added `getPaymentGroupDetail()` + `PaymentGroupDetail`, `PaymentGroupMovementItem`, `PaymentGroupAllocationItem` types; updated header comment |
-| `src/lib/finance/labels.ts` | Added `DIRECTION_LABELS`, `PROCESSING_STATUS_LABELS`, `SOURCE_LABELS` |
-| `src/app/finance/payment-groups/page.tsx` | NEW — list page with filters, table, total count |
-| `src/app/finance/payment-groups/new/page.tsx` | NEW — create page wrapper (async server component, loads centers) |
-| `src/app/finance/payment-groups/new/_components/create-payment-group-form.tsx` | NEW — client form: all required + optional fields, NaN guard, redirect on success |
-| `src/app/finance/payment-groups/[id]/page.tsx` | NEW — detail page: header card, movements table, allocations table |
-| `src/components/layout/crm-sidebar.tsx` | Finance sidebar: 'Platební skupiny' → /finance/payment-groups (wired); 'Přehled pohybů' disabled (no route yet) |
+### Modified
+- `src/lib/finance/actions.ts` — added 3 read helpers + `or`/`SQL` imports
+
+### Created (new, untracked)
+- `src/app/finance/payment-groups/[id]/movements/new/page.tsx`
+- `src/app/finance/payment-groups/[id]/movements/new/_components/create-movement-form.tsx`
+
+### Modified (single-line change)
+- `src/app/finance/payment-groups/[id]/page.tsx` — added "Přidat pohyb" link to movements section header
 
 ---
 
-## New Routes
+## What Was Built
 
-| Route | Status | Notes |
-|---|---|---|
-| `/finance/payment-groups` | ✅ Operational | List with direction + status filters via searchParams |
-| `/finance/payment-groups/new` | ✅ Operational | Full create form, redirect to detail on success |
-| `/finance/payment-groups/[id]` | ✅ Operational | Detail: info card + movements table + allocations table |
+### 1. Backend: finance tree list helpers (`actions.ts`)
+
+Three new exported read functions:
+
+```ts
+listFinancialTreeCategories(input?: { activeOnly?: boolean; direction?: string })
+```
+- Filters by `isActive` (default true)
+- `direction` filter: returns categories where `direction = input.direction OR direction = 'BOTH'`
+- Uses `or()` + correctly typed `(SQL | undefined)[]` conditions array
+- Returns `ActionResult<{ items: FinancialTreeCategoryListItem[] }>`
+
+```ts
+listFinancialTreeTypes(input?: { categoryId?: string; activeOnly?: boolean })
+```
+- Optional `categoryId` filter; `activeOnly` defaults true
+- Returns `ActionResult<{ items: FinancialTreeTypeListItem[] }>`
+
+```ts
+listFinancialTreeDetails(input?: { typeId?: string; activeOnly?: boolean })
+```
+- Optional `typeId` filter; `activeOnly` defaults true
+- Returns `ActionResult<{ items: FinancialTreeDetailListItem[] }>`
+
+All three exported list item types also added.
+
+### 2. UI: "Přidat pohyb" button (`payment-groups/[id]/page.tsx`)
+
+Movements section header is now a flex row:
+- "Finanční pohyby" heading on the left
+- "Přidat pohyb" link button on the right → `/finance/payment-groups/[id]/movements/new`
+
+### 3. New route: `movements/new/page.tsx` (server component)
+
+- Awaits `params: Promise<{ id: string }>` (Next.js 15 pattern)
+- Calls `getPaymentGroupDetail(id)` — `notFound()` if missing
+- Loads `listFinancialTreeCategories({ direction: pg.direction })` — filtered by PG direction + BOTH
+- Loads `listFinancialTreeTypes()` + `listFinancialTreeDetails()` — all active, for client-side cascade
+- Computes `defaultMovementDate = new Date().toISOString().split('T')[0]`
+- Renders page header + back link + `<CreateMovementForm>`
+
+### 4. New component: `create-movement-form.tsx` (client component)
+
+Full form for creating a FinancialMovement inside an existing PaymentGroup:
+
+**Fixed/inherited from PaymentGroup:**
+- `centerId`, center display name, and `direction` — read-only, not user-editable
+
+**User-editable fields:**
+- `movementDate` — date input (default today)
+- `description` — required text input
+- Category → Type → Detail cascading selects (client-side filtering, fully controlled state)
+- `vatMode` — NO_VAT / STANDARD / REVERSE_CHARGE
+- `amountNet` — number input (controlled)
+- `vatRate` — number input (visible only when vatMode ≠ NO_VAT)
+
+**Computed read-only display:**
+- `vatAmount = Math.round(amountNet * (vatRate/100) * 100) / 100` (0 when NO_VAT)
+- `amountGross` computed via integer-scaled addition: `(Math.round(amountNet*100) + Math.round(vatAmount*100)) / 100`
+  — guarantees server-side check `scaledGross === scaledNet + scaledVat` always passes
+
+**Optional:**
+- `note` — textarea
+
+**On submit:** calls `createFinancialMovement()`, redirects to `/finance/payment-groups/[pgId]` on success, shows inline error on failure.
 
 ---
 
 ## Verification
 
-```
-npx tsc --noEmit
-```
-Result: **0 errors, 0 warnings**
+- `npx tsc --noEmit` — zero errors
+- Spec compliance reviewed by dedicated reviewer subagent — all requirements verified
+- Code quality reviewed — 4 issues found and fixed before completion:
+  - VAT float accumulation fixed (integer-scaled amountGross)
+  - `name` attributes added to controlled inputs
+  - Detail select made fully controlled with correct reset on category/type change
+  - Dead `name="vatMode"` removed from controlled vatMode select
 
 ---
 
-## What Operators Can Do Now
+## Unresolved Risks / Deferred Items
 
-1. Navigate to **Platební skupiny** from the sidebar
-2. View all payment groups in a table (date, direction, source, amounts, status)
-3. Create a new PaymentGroup (center, direction, source, amount, date, counterparty, symbols, note)
-4. View PaymentGroup detail with:
-   - Full info card (all fields, computed remaining amount)
-   - Movements table (empty placeholder for now)
-   - Allocations table (empty placeholder for now)
+- **Server page uses `getPaymentGroupDetail`** — fetches all movements + allocations unnecessarily for this form. Acceptable in Phase 1; a dedicated `getPaymentGroupHeader` is worth adding before data volume grows.
+- **`defaultMovementDate` is UTC-based** — may show yesterday for European users past local midnight. Low risk for internal operator tool.
+- **`PaymentGroupDetail.direction` typed as `string`** (not `FinanceDirection`) — causes cast in the form component. Upstream type tightening deferred.
+- **No empty-detail-list guard** — if a type has zero active details the submit fails at server with ID-not-found rather than a friendly message.
 
 ---
 
-## What Is NOT Yet Implemented (Wave 12.2 scope)
+## Branch Continuity
 
-| Feature | Notes |
-|---|---|
-| Create FinancialMovement form | No create form on PaymentGroup detail yet |
-| Allocate PaymentGroup to Order | No allocation dialog from PaymentGroup side |
-| /finance/movements list | No standalone movements route |
-| Order-side allocation refresh | add-allocation-dialog exists in orders module and remains working |
+Branch: `feat-relations-phase-1a`
+Last clean commit: `33a2b24`
+Status: Wave 12.2 complete, NOT YET committed (per instruction)
 
----
-
-## Architectural Notes
-
-- `getPaymentGroupDetail` uses `innerJoin(centers)` — safe because `centerId` is NOT NULL
-- `listCenters` defaults `activeOnly=true` — form only shows active centers
-- `DIRECTION_LABELS` / `PROCESSING_STATUS_LABELS` / `SOURCE_LABELS` now exist in labels.ts for all UI use
-- `createPaymentGroupForm` passes `totalAmount` as `parseFloat(raw).toFixed(2)` string — matches `decimalString()` regex in validator
-- NaN guard on amount input prevents confusing validator error on empty field
-- Tree category/type/detail cascade selects deferred to Wave 12.2 (FinancialMovement form)
-
----
-
-## Unresolved Issues / Risks
-
-1. **Movement creation from PaymentGroup detail** — the PaymentGroup detail page shows a movements section but has no "add movement" button. This is intentional (Wave 12.2 scope). The section shows empty state cleanly.
-2. **Allocation from PaymentGroup side** — similarly deferred. The existing `add-allocation-dialog` on order detail side continues to work. The reverse flow (PaymentGroup → pick order) is Wave 12.2.
-3. **processingStatus filter on list page** — list page reads from searchParams but no filter UI exists yet. Filters can be added as a client component in a future sub-wave.
-
----
-
-## Branch and Repository Continuity
-
-- Branch: `feat/relations-phase-1a`
-- Worktree: `C:\Corporight\Claude\Corporight CRM 1.0\.worktrees\feat-relations-phase-1a\my-app`
-- All changes in this session are uncommitted — git commit when ready
-- No migrations required — no schema changes in this session
-
----
-
-## Recommended Next Implementation Step (Wave 12.2)
-
-**Option A (minimal):** Add "create movement" form on PaymentGroup detail page.
-Requires: cascaded category→type→detail dropdowns (filter client-side), VAT amount
-calculation UI, direction pre-filled from parent PaymentGroup.
-
-**Option B (standalone):** Build /finance/movements list page + CreateFinancialMovement
-form as a standalone route accessible from the Pohyby sidebar item.
-
-**Option C (allocation loop):** Add "Alokovat na zakázku" dialog on PaymentGroup
-detail — reverse of the existing add-allocation-dialog (caller = PaymentGroup, user
-picks order). This completes the full operator loop for INCOME payment groups.
-
-Recommended order: A → C → B
-(Movement creation + allocation from PG side = complete INCOME loop first,
-then movements list as reporting/audit view.)
+Next logical step: Wave 12.3 — PaymentGroup → Order allocation from the finance side.

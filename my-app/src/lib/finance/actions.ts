@@ -33,7 +33,7 @@ import {
   orders,
   orderItems,
 } from '@/db/schema'
-import { eq, and, gte, lte, sql } from 'drizzle-orm'
+import { eq, and, or, gte, lte, sql, type SQL } from 'drizzle-orm'
 import {
   createCenterSchema,
   createFinancialTreeCategorySchema,
@@ -1124,6 +1124,151 @@ export async function getPaymentGroupDetail(
         allocations: allocations as PaymentGroupAllocationItem[],
       },
     }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Unknown error'
+    return { success: false, error: message }
+  }
+}
+
+// ── listFinancialTreeCategories ────────────────────────────────────
+
+export type FinancialTreeCategoryListItem = {
+  id: string
+  code: string
+  name: string
+  direction: string
+  isActive: boolean
+  sortOrder: number
+}
+
+export async function listFinancialTreeCategories(
+  input: { activeOnly?: boolean; direction?: string } = {},
+): Promise<ActionResult<{ items: FinancialTreeCategoryListItem[] }>> {
+  const activeOnly = input.activeOnly ?? true
+  const { direction } = input
+
+  const conditions: (SQL | undefined)[] = []
+  if (activeOnly) conditions.push(eq(financialTreeCategories.isActive, true))
+  if (direction) {
+    conditions.push(
+      or(
+        eq(financialTreeCategories.direction, direction),
+        eq(financialTreeCategories.direction, 'BOTH'),
+      )!,
+    )
+  }
+
+  const where = conditions.length > 1
+    ? and(...conditions)
+    : conditions[0]
+
+  try {
+    const rows = await db
+      .select({
+        id: financialTreeCategories.id,
+        code: financialTreeCategories.code,
+        name: financialTreeCategories.name,
+        direction: financialTreeCategories.direction,
+        isActive: financialTreeCategories.isActive,
+        sortOrder: financialTreeCategories.sortOrder,
+      })
+      .from(financialTreeCategories)
+      .where(where)
+      .orderBy(financialTreeCategories.sortOrder, financialTreeCategories.name)
+
+    return { success: true, data: { items: rows as FinancialTreeCategoryListItem[] } }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Unknown error'
+    return { success: false, error: message }
+  }
+}
+
+// ── listFinancialTreeTypes ─────────────────────────────────────────
+
+export type FinancialTreeTypeListItem = {
+  id: string
+  code: string
+  name: string
+  categoryId: string
+  isActive: boolean
+  sortOrder: number
+}
+
+export async function listFinancialTreeTypes(
+  input: { categoryId?: string; activeOnly?: boolean } = {},
+): Promise<ActionResult<{ items: FinancialTreeTypeListItem[] }>> {
+  const activeOnly = input.activeOnly ?? true
+  const { categoryId } = input
+
+  const conditions = []
+  if (activeOnly)   conditions.push(eq(financialTreeTypes.isActive, true))
+  if (categoryId)   conditions.push(eq(financialTreeTypes.categoryId, categoryId))
+
+  const where = conditions.length > 1
+    ? and(...(conditions as [ReturnType<typeof eq>, ...ReturnType<typeof eq>[]]))
+    : conditions[0]
+
+  try {
+    const rows = await db
+      .select({
+        id: financialTreeTypes.id,
+        code: financialTreeTypes.code,
+        name: financialTreeTypes.name,
+        categoryId: financialTreeTypes.categoryId,
+        isActive: financialTreeTypes.isActive,
+        sortOrder: financialTreeTypes.sortOrder,
+      })
+      .from(financialTreeTypes)
+      .where(where)
+      .orderBy(financialTreeTypes.sortOrder, financialTreeTypes.name)
+
+    return { success: true, data: { items: rows as FinancialTreeTypeListItem[] } }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Unknown error'
+    return { success: false, error: message }
+  }
+}
+
+// ── listFinancialTreeDetails ───────────────────────────────────────
+
+export type FinancialTreeDetailListItem = {
+  id: string
+  code: string
+  name: string
+  typeId: string
+  isActive: boolean
+  sortOrder: number
+}
+
+export async function listFinancialTreeDetails(
+  input: { typeId?: string; activeOnly?: boolean } = {},
+): Promise<ActionResult<{ items: FinancialTreeDetailListItem[] }>> {
+  const activeOnly = input.activeOnly ?? true
+  const { typeId } = input
+
+  const conditions = []
+  if (activeOnly) conditions.push(eq(financialTreeDetails.isActive, true))
+  if (typeId)     conditions.push(eq(financialTreeDetails.typeId, typeId))
+
+  const where = conditions.length > 1
+    ? and(...(conditions as [ReturnType<typeof eq>, ...ReturnType<typeof eq>[]]))
+    : conditions[0]
+
+  try {
+    const rows = await db
+      .select({
+        id: financialTreeDetails.id,
+        code: financialTreeDetails.code,
+        name: financialTreeDetails.name,
+        typeId: financialTreeDetails.typeId,
+        isActive: financialTreeDetails.isActive,
+        sortOrder: financialTreeDetails.sortOrder,
+      })
+      .from(financialTreeDetails)
+      .where(where)
+      .orderBy(financialTreeDetails.sortOrder, financialTreeDetails.name)
+
+    return { success: true, data: { items: rows as FinancialTreeDetailListItem[] } }
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error'
     return { success: false, error: message }
