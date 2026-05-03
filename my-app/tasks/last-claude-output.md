@@ -1,97 +1,128 @@
-# CC Session 12.3 — Implementation Report
+# CC Session 12.4 — Implementation Report
 
 ## Mission
 
-PaymentGroup → Order allocation from the finance side.
-Completes the standalone Finance income operator loop.
+Replace the single-row FinancialMovement creation form with an invoice-style multi-line movement builder. Completes the spec reconciliation identified after live UI review of Waves 12.1–12.3.
 
 ## Base commit
 
-`764a78c` — CC Session 12.2: add financial movement creation in payment groups
+`764a78c` — CC Session 12.2 (plus uncommitted 12.3 changes)
 
 ---
 
 ## Changed Files
 
-### Created (new, untracked)
-- `src/components/finance/add-order-allocation-dialog.tsx` — client dialog component
-
 ### Modified
-- `src/app/finance/payment-groups/[id]/page.tsx` — import + Alokace section header + conditional dialog render
-- `tasks/last-claude-output.md` — this file
+- `src/lib/finance/validators.ts` — added `movementRowSchema` + `createFinancialMovementsSchema` (lines 157–182)
+- `src/lib/finance/actions.ts` — added `createFinancialMovements()` bulk server action + import additions (~193 new lines)
+- `src/app/finance/payment-groups/[id]/movements/new/page.tsx` — added orders loading + truncation flag prop
+- `src/app/finance/payment-groups/[id]/movements/new/_components/create-movement-form.tsx` — FULL REPLACEMENT: multi-row invoice-style builder
 
 ---
 
 ## What Was Built
 
-### 1. `AddOrderAllocationDialog` (`src/components/finance/add-order-allocation-dialog.tsx`)
+### 1. `movementRowSchema` + `createFinancialMovementsSchema` (`validators.ts`)
 
-New client component that inverts the existing `AddAllocationDialog` flow: the PaymentGroup is fixed, the operator selects an Order.
+Two new schemas appended. Existing schemas are unchanged.
 
-**Props:** `pgId: string`, `remaining: string`
+**`movementRowSchema`** — per-row shape:
+- Required: `categoryId`, `typeId`, `detailId` (all UUID), `amountNet` (decimalString), `description` (min 1)
+- Defaulted: `vatMode` (default `NO_VAT`), `vatRate` (optional, default `'0'`)
+- Optional: `orderId` (UUID), `note`
 
-**Behaviour:**
-- Trigger button: "Alokovat na zakázku"
-- Lazy-loads orders on dialog open: `listOrders({ limit: 50 })` — no status param (`ACTIVE` is not a valid status in this codebase). CANCELLED orders are excluded client-side.
-- Client-side text filter on `order.number` and `order.clientDisplayName`; clears `selectedOrderId` on filter change to prevent stale hidden selections
-- Order select option label: `{number} | {clientDisplayName ?? '—'} | Stav: {status}`
-- Amount input pre-filled with `remaining`; validates `> 0` AND `<= remaining` client-side (NaN guard included for invalid `remaining` prop)
-- Truncation warning shown when `total > items.length` (visible to operator when 50-limit is hit)
-- Optional note input
-- Calls `createPaymentAllocation({ paymentGroupId: pgId, orderId, allocatedAmount: parsed.toFixed(2), note })`
-- On success: `setOpen(false)` + `router.refresh()`
-- Inline error display
-
-**Imports:** `listOrders` / `OrderListItem` from `@/lib/orders/actions`, `createPaymentAllocation` from `@/lib/finance/actions`, shadcn/ui components.
-
-**No new backend actions needed:** `createPaymentAllocation` and `listOrders` are both pre-existing and sufficient.
-
-### 2. Payment group detail page modification (`payment-groups/[id]/page.tsx`)
-
-Alokace section header changed from plain h2 to flex row (matching Finanční pohyby header pattern):
-
-```tsx
-<div className="flex items-center justify-between mb-3">
-  <h2 className="text-sm font-semibold text-gray-700">Alokace</h2>
-  {pg.direction === 'INCOME' &&
-   pg.processingStatus !== 'CANCELLED' &&
-   parseFloat(remaining) > 0 && (
-    <AddOrderAllocationDialog pgId={pg.id} remaining={remaining} />
-  )}
-</div>
-```
-
-The button renders only when:
-- Direction is INCOME (only income PGs support allocations per service invariant)
-- PG is not CANCELLED
-- There is remaining unallocated capacity (`remaining > 0`)
-
-Page remains a server component — `AddOrderAllocationDialog` is imported as a client island.
+**`createFinancialMovementsSchema`** — outer bulk payload:
+- Required: `paymentGroupId`, `centerId`, `direction`, `movementDate`
+- Optional: `createdBy`
+- `rows`: array of `movementRowSchema`, min 1
 
 ---
 
-## Status note on order statuses
+### 2. `createFinancialMovements()` (`actions.ts`)
 
-`ACTIVE` is not a valid status in this codebase. The valid statuses are: `CONCEPT`, `WAITING_FOR_PAYMENT`, `DOCUMENT_PREPARATION`, `WAITING_FOR_DOCUMENTS`, `EXECUTION`, `COMPLETED`, `CANCELLED`. The dialog loads all orders (`listOrders({ limit: 50 })`) and excludes CANCELLED client-side, giving the operator access to all live and completed orders.
+New bulk server action. Does NOT alter `createFinancialMovement` (singular).
+
+**Three-phase execution:**
+
+**Phase 1 — PG verification (3 checks):**
+- PG exists
+- PG direction matches input direction
+- PG centerId matches input centerId ← new check not present in singular action
+
+**Phase 2 — Pre-validate ALL rows before inserting any:**
+Per row (with row label in error messages):
+- `detail.typeId` matches input `typeId`
+- `type.categoryId` matches input `categoryId`
+- `category.direction === direction OR category.direction === 'BOTH'`
+- `vatMode === NO_VAT` → `vatRate` must be 0
+- Integer-scaled amountGross = amountNet + vatAmount
+- If `orderId` present: order existence check
+
+**Phase 3 — Single `db.transaction()` for all N inserts:**
+- N `financial_movements` inserts
+- N `audit_log` inserts (one per movement, same transaction)
+- Returns `ActionResult<{ ids: string[] }>`
+
+---
+
+### 3. Page update (`movements/new/page.tsx`)
+
+- Added `listOrders({ limit: 50 })` to `Promise.all`
+- CANCELLED orders excluded client-side
+- `ordersTruncated = ordersTotal > ordersRaw.length` computed and passed as prop
+- `orders` and `ordersTruncated` passed to `<CreateMovementForm>`
+
+---
+
+### 4. `CreateMovementForm` replacement (`create-movement-form.tsx`)
+
+Full replacement. The new component is a multi-row invoice-style builder.
+
+**Architecture:**
+- `RowState` type + `newEmptyRow()` helper
+- `computeRowAmounts(row)` helper at module scope — single source of VAT arithmetic used for both preview display and submit mapper (no duplication)
+- State: `rows: RowState[]` (starts with one), controlled `movementDate`, `globalError`
+- `updateRow`, `addRow`, `removeRow` helpers; remove disabled when only 1 row
+
+**Per-row UI (each row in a bordered card):**
+- Cascading selects: Kategorie → Typ (filtered) → Detail (filtered), with downstream reset on change
+- Popis text input
+- Způsob DPH select
+- Základ daně number input
+- Sazba DPH % (shown only when vatMode ≠ NO_VAT)
+- Inline computed preview: DPH and Hrubá per row
+- Zakázka optional select from orders prop; amber warning shown when `ordersTruncated` is true
+- Poznámka textarea
+
+**Footer:** Total gross sum across all rows
+
+**Submit:** Validates all rows client-side first → calls `createFinancialMovements()` → `router.push` to PG detail on success
+
+**Type safety:** `direction` prop typed as `'INCOME' | 'EXPENSE' | 'INTERNAL'` (not `string`); no unsafe casts in component.
+
+**Navigation:** Cancel uses `<Link>` (not `<a>`), consistent with codebase pattern.
 
 ---
 
 ## Verification
 
-- `npx tsc --noEmit` — zero errors
-- Spec compliance reviewed by dedicated subagent — all requirements verified
-- Code quality reviewed — 3 issues found and fixed:
-  - Filter onChange now clears `selectedOrderId` (prevents stale hidden selection)
-  - NaN guard added for invalid `remaining` prop in submit handler
-  - Truncation warning added when 50-item limit is hit
+- `npx tsc --noEmit` — zero errors (confirmed after all fixes applied)
+- Spec compliance reviewed by dedicated subagent — all requirements verified (SPEC_COMPLIANT)
+- Code quality reviewed — 4 issues found and fixed:
+  1. Duplicate VAT arithmetic → extracted into `computeRowAmounts()` helper
+  2. `direction: string` prop → narrowed to literal union, cast removed
+  3. Cancel `<a>` → replaced with `<Link>`
+  4. Truncation warning missing → `ordersTruncated` flag computed in page, amber warning in form
+- Final quality re-review: APPROVED
 
 ---
 
 ## Unresolved Risks / Deferred Items
 
-- **50-order limit with no server-side search** — the dialog fetches at most 50 orders. When the order table grows, operators will need to use the text filter more carefully. A proper fix requires wiring the filter input to `listOrders({ search: filter })` with debounce (server-side ilike on order number). Deferred to a future session when data volume justifies it.
-- **COMPLETED orders included** — by design for Phase 1. Allocating to a completed order is an edge case but not blocked.
-- **Tailwind palette inconsistency** — trigger button uses `bg-gray-900` while existing `AddAllocationDialog` uses `bg-slate-800`. Cosmetic, deferred.
+- **50-order limit with no server-side search** — same deferred item as 12.3; the `ordersTruncated` warning now at least informs operators when they may be missing entries.
+- **N+1 pre-validation queries outside transaction** — Phase 1 acceptable (2–5 rows typical, small team). TOCTOU window between validation and insert exists but is not a practical risk at current data volumes.
+- **UTC-vs-local default date** — `new Date().toISOString()` gives UTC date; pre-existing pattern across all forms in the codebase.
+- **`orders` truncation logic** — `ordersTruncated` is computed against `ordersRaw.length` (before CANCELLED filter), not `orders.length` (after). If all 50 fetched records are non-CANCELLED this has no effect; edge case only when CANCELLED orders occupy a meaningful portion of the 50-item cap.
 
 ---
 
@@ -99,9 +130,8 @@ Page remains a server component — `AddOrderAllocationDialog` is imported as a 
 
 Branch: `feat/relations-phase-1a`
 Last clean commit: `764a78c`
-Status: Wave 12.3 complete, NOT YET committed (per instruction)
+Status: Wave 12.4 complete, NOT YET committed (per instruction)
 
-The standalone Finance income operator loop is now complete:
-create PaymentGroup → create FinancialMovement → allocate to Order.
+The multi-row invoice-style movement builder is now in place. The Finance standalone vertical is functionally complete for Phase 1: create PaymentGroup → create FinancialMovements (multi-row) → allocate to Order.
 
-Next logical step: Wave 12.4 — cancel allocation from PaymentGroup side, or branch finish.
+Next logical step: commit Wave 12.3 + 12.4 together, or branch finish.

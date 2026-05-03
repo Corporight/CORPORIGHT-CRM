@@ -152,3 +152,30 @@ export const listFinancialMovementsSchema = z.object({
   offset: z.number().int().min(0).default(0),
 })
 export type ListFinancialMovementsInput = z.input<typeof listFinancialMovementsSchema>
+
+// ── movementRow (per-row data in bulk creation) ─────────────────────
+
+export const movementRowSchema = z.object({
+  categoryId: z.string().uuid('categoryId must be a UUID'),
+  typeId: z.string().uuid('typeId must be a UUID'),
+  detailId: z.string().uuid('detailId must be a UUID'),
+  vatMode: z.enum(FINANCIAL_MOVEMENT_VAT_MODES).default('NO_VAT'),
+  amountNet: decimalString('amountNet'),
+  vatRate: decimalString('vatRate').optional().default('0'),
+  description: z.string().min(1, 'description is required'),
+  orderId: z.string().uuid().optional(),
+  note: z.string().optional(),
+})
+export type MovementRowInput = z.input<typeof movementRowSchema>
+
+// ── createFinancialMovements (bulk, one PG) ──────────────────────────
+
+export const createFinancialMovementsSchema = z.object({
+  paymentGroupId: z.string().uuid('paymentGroupId must be a UUID'),
+  centerId: z.string().uuid('centerId must be a UUID'),
+  direction: z.enum(FINANCE_DIRECTIONS),
+  movementDate: dateString('movementDate'),
+  createdBy: z.string().uuid().optional(),
+  rows: z.array(movementRowSchema).min(1, 'At least one movement row is required'),
+})
+export type CreateFinancialMovementsInput = z.input<typeof createFinancialMovementsSchema>

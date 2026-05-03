@@ -9,6 +9,7 @@ import {
   type FinancialTreeTypeListItem,
   type FinancialTreeDetailListItem,
 } from '@/lib/finance/actions'
+import { listOrders, type OrderListItem } from '@/lib/orders/actions'
 import { CreateMovementForm } from './_components/create-movement-form'
 
 export default async function NewMovementPage({
@@ -24,10 +25,11 @@ export default async function NewMovementPage({
   }
   const pg = pgResult.data
 
-  const [categoriesResult, typesResult, detailsResult] = await Promise.all([
+  const [categoriesResult, typesResult, detailsResult, ordersResult] = await Promise.all([
     listFinancialTreeCategories({ activeOnly: true, direction: pg.direction }),
     listFinancialTreeTypes({ activeOnly: true }),
     listFinancialTreeDetails({ activeOnly: true }),
+    listOrders({ limit: 50 }),
   ])
 
   const categories: FinancialTreeCategoryListItem[] = categoriesResult.success
@@ -39,6 +41,10 @@ export default async function NewMovementPage({
   const details: FinancialTreeDetailListItem[] = detailsResult.success
     ? detailsResult.data.items
     : []
+  const ordersRaw = ordersResult.success ? ordersResult.data.items : []
+  const ordersTotal = ordersResult.success ? ordersResult.data.total : 0
+  const orders: OrderListItem[] = ordersRaw.filter((o) => o.status !== 'CANCELLED')
+  const ordersTruncated = ordersTotal > ordersRaw.length
 
   const defaultMovementDate = new Date().toISOString().split('T')[0]
 
@@ -60,11 +66,13 @@ export default async function NewMovementPage({
         centerId={pg.centerId}
         centerCode={pg.centerCode}
         centerName={pg.centerName}
-        direction={pg.direction}
+        direction={pg.direction as 'INCOME' | 'EXPENSE' | 'INTERNAL'}
         categories={categories}
         types={types}
         details={details}
         defaultMovementDate={defaultMovementDate}
+        orders={orders}
+        ordersTruncated={ordersTruncated}
       />
     </div>
   )

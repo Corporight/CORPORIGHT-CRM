@@ -55,6 +55,8 @@ import {
   type CancelPaymentAllocationInput,
   type ListPaymentGroupsInput,
   type ListFinancialMovementsInput,
+  createFinancialMovementsSchema,
+  type CreateFinancialMovementsInput,
 } from './validators'
 import {
   recalculatePaymentGroupAllocationState,
@@ -1269,6 +1271,198 @@ export async function listFinancialTreeDetails(
       .orderBy(financialTreeDetails.sortOrder, financialTreeDetails.name)
 
     return { success: true, data: { items: rows as FinancialTreeDetailListItem[] } }
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Unknown error'
+    return { success: false, error: message }
+  }
+}
+
+// ── createFinancialMovements ───────────────────────────────────────
+// Bulk action: inserts N financial_movements in a single transaction.
+// Pre-validates ALL rows before inserting any.
+// Verifies: centerId matches PG centerId, PG direction matches input direction.
+
+export async function createFinancialMovements(
+  input: CreateFinancialMovementsInput,
+): Promise<ActionResult<{ ids: string[] }>> {
+  const parsed = createFinancialMovementsSchema.safeParse(input)
+  if (!parsed.success) {
+    return { success: false, error: parsed.error.issues[0].message }
+  }
+
+  const { paymentGroupId, centerId, direction, movementDate, createdBy, rows } = parsed.data
+
+  // 1. Verify payment group exists, direction matches, centerId matches
+  const pg = await db.query.paymentGroups.findFirst({
+    where: eq(paymentGroups.id, paymentGroupId),
+    columns: { id: true, direction: true, centerId: true },
+  })
+  if (!pg) {
+    return { success: false, error: `Payment group not found: ${paymentGroupId}` }
+  }
+  if (pg.direction !== direction) {
+    return {
+      success: false,
+      error: `Movement direction (${direction}) must match payment group direction (${pg.direction}).`,
+    }
+  }
+  if (pg.centerId !== centerId) {
+    return {
+      success: false,
+      error: `centerId (${centerId}) does not match payment group centerId (${pg.centerId}).`,
+    }
+  }
+
+  // 2. Pre-validate ALL rows before inserting any
+  type ValidatedRow = {
+    categoryId: string
+    typeId: string
+    detailId: string
+    vatMode: 'NO_VAT' | 'STANDARD' | 'REVERSE_CHARGE'
+    amountNet: string
+    vatRate: string
+    vatAmount: string
+    amountGross: string
+    description: string
+    orderId: string | undefined
+    note: string | undefined
+  }
+
+  const validatedRows: ValidatedRow[] = []
+
+  for (let i = 0; i < rows.length; i++) {
+    const row = rows[i]
+    const rowLabel = `Row ${i + 1}`
+
+    // Tree linkage
+    const detail = await db.query.financialTreeDetails.findFirst({
+      where: eq(financialTreeDetails.id, row.detailId),
+      columns: { id: true, typeId: true },
+    })
+    if (!detail) {
+      return { success: false, error: `${rowLabel}: Financial tree detail not found: ${row.detailId}` }
+    }
+    if (detail.typeId !== row.typeId) {
+      return { success: false, error: `${rowLabel}: Detail ${row.detailId} does not belong to type ${row.typeId}.` }
+    }
+
+    const type = await db.query.financialTreeTypes.findFirst({
+      where: eq(financialTreeTypes.id, row.typeId),
+      columns: { id: true, categoryId: true },
+    })
+    if (!type) {
+      return { success: false, error: `${rowLabel}: Financial tree type not found: ${row.typeId}` }
+    }
+    if (type.categoryId !== row.categoryId) {
+      return { success: false, error: `${rowLabel}: Type ${row.typeId} does not belong to category ${row.categoryId}.` }
+    }
+
+    const category = await db.query.financialTreeCategories.findFirst({
+      where: eq(financialTreeCategories.id, row.categoryId),
+      columns: { id: true, direction: true },
+    })
+    if (!category) {
+      return { success: false, error: `${rowLabel}: Financial tree category not found: ${row.categoryId}` }
+    }
+    if (category.direction !== direction && category.direction !== 'BOTH') {
+      return {
+        success: false,
+        error: `${rowLabel}: Category direction (${category.direction}) does not match movement direction (${direction}).`,
+      }
+    }
+
+    // VAT arithmetic (integer-scaled to avoid float drift)
+    const amountNetNum = parseFloat(row.amountNet)
+    const vatRateNum = parseFloat(row.vatRate ?? '0')
+    const vatAmountNum = row.vatMode === 'NO_VAT'
+      ? 0
+      : Math.round(amountNetNum * (vatRateNum / 100) * 100) / 100
+
+    if (row.vatMode === 'NO_VAT' && vatRateNum !== 0) {
+      return { success: false, error: `${rowLabel}: vatMode is NO_VAT but vatRate is not 0.` }
+    }
+
+    const amountGrossScaled = Math.round(amountNetNum * 100) + Math.round(vatAmountNum * 100)
+    const amountGrossNum = amountGrossScaled / 100
+
+    // orderId existence check
+    if (row.orderId) {
+      const order = await db.query.orders.findFirst({
+        where: eq(orders.id, row.orderId),
+        columns: { id: true },
+      })
+      if (!order) {
+        return { success: false, error: `${rowLabel}: Order not found: ${row.orderId}` }
+      }
+    }
+
+    validatedRows.push({
+      categoryId: row.categoryId,
+      typeId: row.typeId,
+      detailId: row.detailId,
+      vatMode: row.vatMode,
+      amountNet: row.amountNet,
+      vatRate: row.vatRate ?? '0',
+      vatAmount: vatAmountNum.toFixed(2),
+      amountGross: amountGrossNum.toFixed(2),
+      description: row.description,
+      orderId: row.orderId,
+      note: row.note,
+    })
+  }
+
+  // 3. Insert all rows in a single transaction
+  try {
+    const ids = await db.transaction(async (tx) => {
+      const insertedIds: string[] = []
+
+      for (const row of validatedRows) {
+        const [record] = await tx
+          .insert(financialMovements)
+          .values({
+            paymentGroupId,
+            orderId: row.orderId ?? null,
+            centerId,
+            direction,
+            amountGross: row.amountGross,
+            amountNet: row.amountNet,
+            vatAmount: row.vatAmount,
+            vatMode: row.vatMode,
+            vatRate: row.vatRate,
+            categoryId: row.categoryId,
+            typeId: row.typeId,
+            detailId: row.detailId,
+            description: row.description,
+            movementDate,
+            note: row.note ?? null,
+            createdBy: createdBy ?? null,
+          })
+          .returning({ id: financialMovements.id })
+
+        await tx.insert(auditLog).values({
+          entityType: 'financial_movement',
+          entityId: record.id,
+          action: 'FINANCIAL_MOVEMENT_CREATED',
+          diff: {
+            direction,
+            amountGross: row.amountGross,
+            amountNet: row.amountNet,
+            vatAmount: row.vatAmount,
+            vatMode: row.vatMode,
+            orderId: row.orderId ?? null,
+            movementDate,
+            description: row.description,
+          },
+          userId: createdBy ?? null,
+        })
+
+        insertedIds.push(record.id)
+      }
+
+      return insertedIds
+    })
+
+    return { success: true, data: { ids } }
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown error'
     return { success: false, error: message }

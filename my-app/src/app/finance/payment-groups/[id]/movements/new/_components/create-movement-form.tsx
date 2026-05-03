@@ -2,12 +2,14 @@
 
 import { useTransition, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { createFinancialMovement } from '@/lib/finance/actions'
+import Link from 'next/link'
+import { createFinancialMovements } from '@/lib/finance/actions'
 import type {
   FinancialTreeCategoryListItem,
   FinancialTreeTypeListItem,
   FinancialTreeDetailListItem,
 } from '@/lib/finance/actions'
+import type { OrderListItem } from '@/lib/orders/actions'
 import { DIRECTION_LABELS, VAT_MODE_LABELS } from '@/lib/finance/labels'
 
 type Props = {
@@ -15,11 +17,56 @@ type Props = {
   centerId: string
   centerCode: string
   centerName: string
-  direction: string
+  direction: 'INCOME' | 'EXPENSE' | 'INTERNAL'
   categories: FinancialTreeCategoryListItem[]
   types: FinancialTreeTypeListItem[]
   details: FinancialTreeDetailListItem[]
   defaultMovementDate: string
+  orders: OrderListItem[]
+  ordersTruncated: boolean
+}
+
+function computeRowAmounts(row: RowState) {
+  const amountNetNum = parseFloat(row.amountNet) || 0
+  const vatRateNum = parseFloat(row.vatRate) || 0
+  const vatAmountNum =
+    row.vatMode === 'NO_VAT'
+      ? 0
+      : Math.round(amountNetNum * (vatRateNum / 100) * 100) / 100
+  const amountGrossScaled =
+    Math.round(amountNetNum * 100) + Math.round(vatAmountNum * 100)
+  return {
+    vatAmountNum,
+    amountGrossNum: amountGrossScaled / 100,
+  }
+}
+
+type RowState = {
+  id: string
+  selectedCategoryId: string
+  selectedTypeId: string
+  selectedDetailId: string
+  vatMode: 'NO_VAT' | 'STANDARD' | 'REVERSE_CHARGE'
+  amountNet: string
+  vatRate: string
+  description: string
+  orderId: string
+  note: string
+}
+
+function newEmptyRow(): RowState {
+  return {
+    id: crypto.randomUUID(),
+    selectedCategoryId: '',
+    selectedTypeId: '',
+    selectedDetailId: '',
+    vatMode: 'NO_VAT',
+    amountNet: '',
+    vatRate: '0',
+    description: '',
+    orderId: '',
+    note: '',
+  }
 }
 
 const inputClass =
@@ -35,87 +82,105 @@ export function CreateMovementForm({
   types,
   details,
   defaultMovementDate,
+  orders,
+  ordersTruncated,
 }: Props) {
   const router = useRouter()
   const [isPending, startTransition] = useTransition()
-  const [error, setError] = useState<string | null>(null)
+  const [rows, setRows] = useState<RowState[]>([newEmptyRow()])
+  const [movementDate, setMovementDate] = useState<string>(defaultMovementDate)
+  const [globalError, setGlobalError] = useState<string | null>(null)
 
-  const [selectedCategoryId, setSelectedCategoryId] = useState<string>('')
-  const [selectedTypeId, setSelectedTypeId] = useState<string>('')
-  const [selectedDetailId, setSelectedDetailId] = useState<string>('')
+  const directionLabel =
+    (DIRECTION_LABELS as Record<string, string>)[direction] ?? direction
 
-  const filteredTypes = selectedCategoryId
-    ? types.filter((t) => t.categoryId === selectedCategoryId)
-    : []
-  const filteredDetails = selectedTypeId
-    ? details.filter((d) => d.typeId === selectedTypeId)
-    : []
+  function updateRow(id: string, patch: Partial<RowState>) {
+    setRows((prev) => prev.map((r) => (r.id === id ? { ...r, ...patch } : r)))
+  }
 
-  const [vatMode, setVatMode] = useState<'NO_VAT' | 'STANDARD' | 'REVERSE_CHARGE'>('NO_VAT')
-  const [amountNet, setAmountNet] = useState<string>('')
-  const [vatRate, setVatRate] = useState<string>('0')
+  function addRow() {
+    setRows((prev) => [...prev, newEmptyRow()])
+  }
 
-  const vatRateNum = parseFloat(vatRate) || 0
-  const amountNetNum = parseFloat(amountNet) || 0
-  const vatAmountNum = vatMode === 'NO_VAT'
-    ? 0
-    : Math.round(amountNetNum * (vatRateNum / 100) * 100) / 100
+  function removeRow(id: string) {
+    setRows((prev) => (prev.length > 1 ? prev.filter((r) => r.id !== id) : prev))
+  }
 
-  const amountGrossScaled = Math.round(amountNetNum * 100) + Math.round(vatAmountNum * 100)
-  const amountGrossNum = amountGrossScaled / 100
+  function filteredTypes(row: RowState) {
+    return row.selectedCategoryId
+      ? types.filter((t) => t.categoryId === row.selectedCategoryId)
+      : []
+  }
 
-  function handleSubmit(e: React.FormEvent<HTMLFormElement>) {
+  function filteredDetails(row: RowState) {
+    return row.selectedTypeId
+      ? details.filter((d) => d.typeId === row.selectedTypeId)
+      : []
+  }
+
+  const totalGross = rows.reduce(
+    (sum, row) => sum + computeRowAmounts(row).amountGrossNum,
+    0,
+  )
+
+  function handleSubmit(e: React.FormEvent) {
     e.preventDefault()
-    setError(null)
-    const formData = new FormData(e.currentTarget)
+    setGlobalError(null)
 
-    const description = (formData.get('description') as string).trim()
-    const movementDate = formData.get('movementDate') as string
-    const categoryId = formData.get('categoryId') as string
-    const typeId = formData.get('typeId') as string
-    const detailId = formData.get('detailId') as string
-    const note = (formData.get('note') as string) || undefined
-
-    if (!description || !movementDate || !categoryId || !typeId || !detailId) {
-      setError('Vyplňte prosím všechna povinná pole.')
+    if (!movementDate) {
+      setGlobalError('Datum pohybu je povinné.')
       return
     }
-    if (!amountNet || amountNetNum <= 0) {
-      setError('Zadejte platnou částku.')
-      return
+
+    for (let i = 0; i < rows.length; i++) {
+      const row = rows[i]
+      if (!row.selectedCategoryId || !row.selectedTypeId || !row.selectedDetailId) {
+        setGlobalError(`Řádek ${i + 1}: Vyplňte kategorii, typ a detail.`)
+        return
+      }
+      if (!row.description.trim()) {
+        setGlobalError(`Řádek ${i + 1}: Popis je povinný.`)
+        return
+      }
+      const net = parseFloat(row.amountNet)
+      if (isNaN(net) || net <= 0) {
+        setGlobalError(`Řádek ${i + 1}: Zadejte platnou částku.`)
+        return
+      }
     }
 
     startTransition(async () => {
-      const result = await createFinancialMovement({
+      const result = await createFinancialMovements({
         paymentGroupId: pgId,
         centerId,
-        direction: direction as 'INCOME' | 'EXPENSE' | 'INTERNAL',
-        amountGross: amountGrossNum.toFixed(2),
-        amountNet: amountNetNum.toFixed(2),
-        vatAmount: vatAmountNum.toFixed(2),
-        vatMode,
-        vatRate: vatMode === 'NO_VAT' ? '0' : vatRate,
-        categoryId,
-        typeId,
-        detailId,
-        description,
+        direction,
         movementDate,
-        note,
+        rows: rows.map((row) => {
+          const amountNetNum = parseFloat(row.amountNet)
+          return {
+            categoryId: row.selectedCategoryId,
+            typeId: row.selectedTypeId,
+            detailId: row.selectedDetailId,
+            vatMode: row.vatMode,
+            amountNet: amountNetNum.toFixed(2),
+            vatRate: row.vatMode === 'NO_VAT' ? '0' : row.vatRate,
+            description: row.description.trim(),
+            orderId: row.orderId || undefined,
+            note: row.note.trim() || undefined,
+          }
+        }),
       })
       if (!result.success) {
-        setError(result.error)
+        setGlobalError(result.error)
         return
       }
       router.push(`/finance/payment-groups/${pgId}`)
     })
   }
 
-  const directionLabel =
-    (DIRECTION_LABELS as Record<string, string>)[direction] ?? direction
-
   return (
-    <form onSubmit={handleSubmit} className="space-y-6 max-w-2xl">
-      {/* Read-only context info */}
+    <form onSubmit={handleSubmit} className="space-y-6 max-w-3xl">
+      {/* Context info */}
       <div className="rounded-md bg-gray-50 border border-gray-200 px-4 py-3 text-sm space-y-1">
         <div>
           <span className="text-gray-500">Středisko:</span>{' '}
@@ -136,198 +201,288 @@ export function CreateMovementForm({
         </label>
         <input
           type="date"
-          name="movementDate"
-          defaultValue={defaultMovementDate}
+          value={movementDate}
+          onChange={(e) => setMovementDate(e.target.value)}
           required
           className={inputClass}
         />
       </div>
 
-      {/* Popis */}
+      {/* Rows section */}
       <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">
-          Popis <span className="text-red-500">*</span>
-        </label>
-        <input
-          type="text"
-          name="description"
-          required
-          className={inputClass}
-        />
-      </div>
-
-      {/* Kategorie */}
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">
-          Kategorie <span className="text-red-500">*</span>
-        </label>
-        <select
-          name="categoryId"
-          required
-          defaultValue=""
-          className={inputClass}
-          onChange={(e) => {
-            setSelectedCategoryId(e.target.value)
-            setSelectedTypeId('')
-            setSelectedDetailId('')
-          }}
-        >
-          <option value="" disabled>
-            Vyberte kategorii…
-          </option>
-          {categories.map((cat) => (
-            <option key={cat.id} value={cat.id}>
-              {cat.code} – {cat.name}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      {/* Typ */}
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">
-          Typ <span className="text-red-500">*</span>
-        </label>
-        <select
-          name="typeId"
-          required
-          defaultValue=""
-          className={inputClass}
-          disabled={!selectedCategoryId}
-          onChange={(e) => {
-            setSelectedTypeId(e.target.value)
-            setSelectedDetailId('')
-          }}
-        >
-          <option value="" disabled>
-            {selectedCategoryId ? 'Vyberte typ…' : 'Nejprve vyberte kategorii'}
-          </option>
-          {filteredTypes.map((t) => (
-            <option key={t.id} value={t.id}>
-              {t.code} – {t.name}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      {/* Detail */}
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">
-          Detail <span className="text-red-500">*</span>
-        </label>
-        <select
-          name="detailId"
-          required
-          value={selectedDetailId}
-          onChange={(e) => setSelectedDetailId(e.target.value)}
-          disabled={!selectedTypeId}
-          className={inputClass}
-        >
-          <option value="" disabled>
-            {selectedTypeId ? 'Vyberte detail…' : 'Nejprve vyberte typ'}
-          </option>
-          {filteredDetails.map((d) => (
-            <option key={d.id} value={d.id}>
-              {d.code} – {d.name}
-            </option>
-          ))}
-        </select>
-      </div>
-
-      {/* Způsob DPH */}
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">
-          Způsob DPH <span className="text-red-500">*</span>
-        </label>
-        <select
-          className={inputClass}
-          value={vatMode}
-          onChange={(e) => {
-            const v = e.target.value as 'NO_VAT' | 'STANDARD' | 'REVERSE_CHARGE'
-            setVatMode(v)
-            if (v === 'NO_VAT') setVatRate('0')
-          }}
-        >
-          {(Object.entries(VAT_MODE_LABELS) as [string, string][]).map(
-            ([value, label]) => (
-              <option key={value} value={value}>
-                {label}
-              </option>
-            ),
-          )}
-        </select>
-      </div>
-
-      {/* Základ daně */}
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">
-          Základ daně (bez DPH) <span className="text-red-500">*</span>
-        </label>
-        <input
-          type="number"
-          name="amountNet"
-          step="0.01"
-          min="0.01"
-          value={amountNet}
-          onChange={(e) => setAmountNet(e.target.value)}
-          className={inputClass}
-        />
-      </div>
-
-      {/* Sazba DPH — only when VAT applies */}
-      {vatMode !== 'NO_VAT' && (
-        <div>
-          <label className="block text-sm font-medium text-gray-700 mb-1">
-            Sazba DPH (%) <span className="text-red-500">*</span>
-          </label>
-          <input
-            type="number"
-            name="vatRate"
-            step="0.01"
-            min="0"
-            value={vatRate}
-            onChange={(e) => setVatRate(e.target.value)}
-            className={inputClass}
-          />
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-sm font-medium text-gray-700">Pohyby</h2>
+          <button
+            type="button"
+            onClick={addRow}
+            className="text-xs font-medium px-3 py-1 rounded-md border border-gray-300 text-gray-700 hover:bg-gray-50"
+          >
+            + Přidat řádek
+          </button>
         </div>
-      )}
 
-      {/* Computed amounts display */}
-      <div className="rounded-md bg-gray-50 border border-gray-200 px-4 py-3 text-sm space-y-1">
-        <p>
-          <span className="text-gray-500">DPH:</span>{' '}
-          <span className="font-medium">{vatAmountNum.toFixed(2)} Kč</span>
-        </p>
-        <p>
-          <span className="text-gray-500">Hrubá částka:</span>{' '}
-          <span className="font-medium">{amountGrossNum.toFixed(2)} Kč</span>
-        </p>
+        <div className="space-y-4">
+          {rows.map((row, index) => {
+            const { vatAmountNum: vatAmount, amountGrossNum: gross } = computeRowAmounts(row)
+            return (
+              <div key={row.id} className="border border-gray-200 rounded-lg p-4 space-y-4">
+                {/* Row header */}
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium text-gray-700">
+                    Řádek {index + 1}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={() => removeRow(row.id)}
+                    disabled={rows.length === 1}
+                    className="text-xs text-red-500 hover:text-red-700 disabled:opacity-30 disabled:cursor-not-allowed"
+                  >
+                    ×
+                  </button>
+                </div>
+
+                {/* Kategorie */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Kategorie <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    value={row.selectedCategoryId}
+                    onChange={(e) =>
+                      updateRow(row.id, {
+                        selectedCategoryId: e.target.value,
+                        selectedTypeId: '',
+                        selectedDetailId: '',
+                      })
+                    }
+                    className={inputClass}
+                  >
+                    <option value="" disabled>
+                      Vyberte kategorii…
+                    </option>
+                    {categories.map((cat) => (
+                      <option key={cat.id} value={cat.id}>
+                        {cat.code} – {cat.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Typ */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Typ <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    value={row.selectedTypeId}
+                    disabled={!row.selectedCategoryId}
+                    onChange={(e) =>
+                      updateRow(row.id, {
+                        selectedTypeId: e.target.value,
+                        selectedDetailId: '',
+                      })
+                    }
+                    className={inputClass}
+                  >
+                    <option value="" disabled>
+                      {row.selectedCategoryId
+                        ? 'Vyberte typ…'
+                        : 'Nejprve vyberte kategorii'}
+                    </option>
+                    {filteredTypes(row).map((t) => (
+                      <option key={t.id} value={t.id}>
+                        {t.code} – {t.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Detail */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Detail <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    value={row.selectedDetailId}
+                    disabled={!row.selectedTypeId}
+                    onChange={(e) =>
+                      updateRow(row.id, { selectedDetailId: e.target.value })
+                    }
+                    className={inputClass}
+                  >
+                    <option value="" disabled>
+                      {row.selectedTypeId
+                        ? 'Vyberte detail…'
+                        : 'Nejprve vyberte typ'}
+                    </option>
+                    {filteredDetails(row).map((d) => (
+                      <option key={d.id} value={d.id}>
+                        {d.code} – {d.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Popis */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Popis <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={row.description}
+                    onChange={(e) =>
+                      updateRow(row.id, { description: e.target.value })
+                    }
+                    className={inputClass}
+                  />
+                </div>
+
+                {/* Způsob DPH */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Způsob DPH <span className="text-red-500">*</span>
+                  </label>
+                  <select
+                    value={row.vatMode}
+                    onChange={(e) => {
+                      const v = e.target.value as RowState['vatMode']
+                      updateRow(row.id, {
+                        vatMode: v,
+                        vatRate: v === 'NO_VAT' ? '0' : row.vatRate,
+                      })
+                    }}
+                    className={inputClass}
+                  >
+                    {(Object.entries(VAT_MODE_LABELS) as [string, string][]).map(
+                      ([value, label]) => (
+                        <option key={value} value={value}>
+                          {label}
+                        </option>
+                      ),
+                    )}
+                  </select>
+                </div>
+
+                {/* Základ daně */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Základ daně (bez DPH) <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="number"
+                    step="0.01"
+                    min="0.01"
+                    value={row.amountNet}
+                    onChange={(e) =>
+                      updateRow(row.id, { amountNet: e.target.value })
+                    }
+                    className={inputClass}
+                  />
+                </div>
+
+                {/* Sazba DPH — only when VAT applies */}
+                {row.vatMode !== 'NO_VAT' && (
+                  <div>
+                    <label className="block text-sm font-medium text-gray-700 mb-1">
+                      Sazba DPH (%) <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="number"
+                      step="0.01"
+                      min="0"
+                      value={row.vatRate}
+                      onChange={(e) =>
+                        updateRow(row.id, { vatRate: e.target.value })
+                      }
+                      className={inputClass}
+                    />
+                  </div>
+                )}
+
+                {/* Computed amounts summary */}
+                <p className="text-sm text-gray-500">
+                  DPH:{' '}
+                  <span className="font-medium text-gray-700">
+                    {vatAmount.toFixed(2)} Kč
+                  </span>{' '}
+                  | Hrubá:{' '}
+                  <span className="font-medium text-gray-700">
+                    {gross.toFixed(2)} Kč
+                  </span>
+                </p>
+
+                {/* Zakázka */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Zakázka
+                  </label>
+                  <select
+                    value={row.orderId}
+                    onChange={(e) =>
+                      updateRow(row.id, { orderId: e.target.value })
+                    }
+                    className={inputClass}
+                  >
+                    <option value="">— (nepřiřazeno)</option>
+                    {orders.map((o) => (
+                      <option key={o.id} value={o.id}>
+                        {o.number}
+                        {o.clientDisplayName ? ` – ${o.clientDisplayName}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                  {ordersTruncated && (
+                    <p className="text-xs text-amber-600 mt-1">
+                      Zobrazeno prvních 50 zakázek. Použijte globální vyhledávání pro starší zakázky.
+                    </p>
+                  )}
+                </div>
+
+                {/* Poznámka */}
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 mb-1">
+                    Poznámka
+                  </label>
+                  <textarea
+                    rows={2}
+                    value={row.note}
+                    onChange={(e) =>
+                      updateRow(row.id, { note: e.target.value })
+                    }
+                    className={inputClass}
+                  />
+                </div>
+              </div>
+            )
+          })}
+        </div>
       </div>
 
-      {/* Poznámka */}
-      <div>
-        <label className="block text-sm font-medium text-gray-700 mb-1">
-          Poznámka
-        </label>
-        <textarea name="note" rows={2} className={inputClass} />
+      {/* Footer total */}
+      <div className="rounded-md bg-gray-50 border border-gray-200 px-4 py-3 text-sm">
+        <span className="text-gray-500">Celkem hrubá:</span>{' '}
+        <span className="font-semibold">{totalGross.toFixed(2)} Kč</span>
       </div>
 
-      {error && <p className="text-sm text-red-600">{error}</p>}
+      {/* Global error */}
+      {globalError && <p className="text-sm text-red-600">{globalError}</p>}
 
+      {/* Actions */}
       <div className="flex gap-3 pt-2">
         <button
           type="submit"
           disabled={isPending}
           className="px-4 py-2 text-sm font-medium rounded-md bg-gray-900 text-white hover:bg-gray-700 disabled:opacity-50 disabled:cursor-not-allowed"
         >
-          {isPending ? 'Vytváření…' : 'Vytvořit pohyb'}
+          {isPending ? 'Vytváření…' : 'Vytvořit pohyby'}
         </button>
-        <a
+        <Link
           href={`/finance/payment-groups/${pgId}`}
           className="px-4 py-2 text-sm font-medium rounded-md border border-gray-300 text-gray-700 hover:bg-gray-50"
         >
           Zrušit
-        </a>
+        </Link>
       </div>
     </form>
   )
