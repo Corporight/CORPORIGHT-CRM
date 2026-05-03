@@ -11,6 +11,7 @@ import {
   VAT_MODE_LABELS,
 } from '@/lib/finance/labels'
 import { formatCZK } from '@/lib/format'
+import { AddOrderAllocationDialog } from '@/components/finance/add-order-allocation-dialog'
 
 function directionBadge(direction: string): string {
   if (direction === 'INCOME') return 'bg-green-100 text-green-800'
@@ -242,7 +243,14 @@ export default async function PaymentGroupDetailPage({
 
         {/* Alokace */}
         <section>
-          <h2 className="text-sm font-semibold text-gray-700 mb-3">Alokace</h2>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-semibold text-gray-700">Alokace</h2>
+            {pg.direction === 'INCOME' &&
+             pg.processingStatus !== 'CANCELLED' &&
+             parseFloat(remaining) > 0 && (
+              <AddOrderAllocationDialog pgId={pg.id} remaining={remaining} />
+            )}
+          </div>
           {pg.allocations.length === 0 ? (
             <p className="text-sm text-gray-400">Žádné alokace.</p>
           ) : (

@@ -1,124 +1,107 @@
-# CC Session 12.2 — Implementation Report
+# CC Session 12.3 — Implementation Report
 
 ## Mission
 
-FinancialMovement creation inside PaymentGroups — standalone finance operator workflow.
+PaymentGroup → Order allocation from the finance side.
+Completes the standalone Finance income operator loop.
 
 ## Base commit
 
-`33a2b24` — CC Session 12.1: add standalone finance payment groups UI
+`764a78c` — CC Session 12.2: add financial movement creation in payment groups
 
 ---
 
 ## Changed Files
 
-### Modified
-- `src/lib/finance/actions.ts` — added 3 read helpers + `or`/`SQL` imports
-
 ### Created (new, untracked)
-- `src/app/finance/payment-groups/[id]/movements/new/page.tsx`
-- `src/app/finance/payment-groups/[id]/movements/new/_components/create-movement-form.tsx`
+- `src/components/finance/add-order-allocation-dialog.tsx` — client dialog component
 
-### Modified (single-line change)
-- `src/app/finance/payment-groups/[id]/page.tsx` — added "Přidat pohyb" link to movements section header
+### Modified
+- `src/app/finance/payment-groups/[id]/page.tsx` — import + Alokace section header + conditional dialog render
+- `tasks/last-claude-output.md` — this file
 
 ---
 
 ## What Was Built
 
-### 1. Backend: finance tree list helpers (`actions.ts`)
+### 1. `AddOrderAllocationDialog` (`src/components/finance/add-order-allocation-dialog.tsx`)
 
-Three new exported read functions:
+New client component that inverts the existing `AddAllocationDialog` flow: the PaymentGroup is fixed, the operator selects an Order.
 
-```ts
-listFinancialTreeCategories(input?: { activeOnly?: boolean; direction?: string })
+**Props:** `pgId: string`, `remaining: string`
+
+**Behaviour:**
+- Trigger button: "Alokovat na zakázku"
+- Lazy-loads orders on dialog open: `listOrders({ limit: 50 })` — no status param (`ACTIVE` is not a valid status in this codebase). CANCELLED orders are excluded client-side.
+- Client-side text filter on `order.number` and `order.clientDisplayName`; clears `selectedOrderId` on filter change to prevent stale hidden selections
+- Order select option label: `{number} | {clientDisplayName ?? '—'} | Stav: {status}`
+- Amount input pre-filled with `remaining`; validates `> 0` AND `<= remaining` client-side (NaN guard included for invalid `remaining` prop)
+- Truncation warning shown when `total > items.length` (visible to operator when 50-limit is hit)
+- Optional note input
+- Calls `createPaymentAllocation({ paymentGroupId: pgId, orderId, allocatedAmount: parsed.toFixed(2), note })`
+- On success: `setOpen(false)` + `router.refresh()`
+- Inline error display
+
+**Imports:** `listOrders` / `OrderListItem` from `@/lib/orders/actions`, `createPaymentAllocation` from `@/lib/finance/actions`, shadcn/ui components.
+
+**No new backend actions needed:** `createPaymentAllocation` and `listOrders` are both pre-existing and sufficient.
+
+### 2. Payment group detail page modification (`payment-groups/[id]/page.tsx`)
+
+Alokace section header changed from plain h2 to flex row (matching Finanční pohyby header pattern):
+
+```tsx
+<div className="flex items-center justify-between mb-3">
+  <h2 className="text-sm font-semibold text-gray-700">Alokace</h2>
+  {pg.direction === 'INCOME' &&
+   pg.processingStatus !== 'CANCELLED' &&
+   parseFloat(remaining) > 0 && (
+    <AddOrderAllocationDialog pgId={pg.id} remaining={remaining} />
+  )}
+</div>
 ```
-- Filters by `isActive` (default true)
-- `direction` filter: returns categories where `direction = input.direction OR direction = 'BOTH'`
-- Uses `or()` + correctly typed `(SQL | undefined)[]` conditions array
-- Returns `ActionResult<{ items: FinancialTreeCategoryListItem[] }>`
 
-```ts
-listFinancialTreeTypes(input?: { categoryId?: string; activeOnly?: boolean })
-```
-- Optional `categoryId` filter; `activeOnly` defaults true
-- Returns `ActionResult<{ items: FinancialTreeTypeListItem[] }>`
+The button renders only when:
+- Direction is INCOME (only income PGs support allocations per service invariant)
+- PG is not CANCELLED
+- There is remaining unallocated capacity (`remaining > 0`)
 
-```ts
-listFinancialTreeDetails(input?: { typeId?: string; activeOnly?: boolean })
-```
-- Optional `typeId` filter; `activeOnly` defaults true
-- Returns `ActionResult<{ items: FinancialTreeDetailListItem[] }>`
+Page remains a server component — `AddOrderAllocationDialog` is imported as a client island.
 
-All three exported list item types also added.
+---
 
-### 2. UI: "Přidat pohyb" button (`payment-groups/[id]/page.tsx`)
+## Status note on order statuses
 
-Movements section header is now a flex row:
-- "Finanční pohyby" heading on the left
-- "Přidat pohyb" link button on the right → `/finance/payment-groups/[id]/movements/new`
-
-### 3. New route: `movements/new/page.tsx` (server component)
-
-- Awaits `params: Promise<{ id: string }>` (Next.js 15 pattern)
-- Calls `getPaymentGroupDetail(id)` — `notFound()` if missing
-- Loads `listFinancialTreeCategories({ direction: pg.direction })` — filtered by PG direction + BOTH
-- Loads `listFinancialTreeTypes()` + `listFinancialTreeDetails()` — all active, for client-side cascade
-- Computes `defaultMovementDate = new Date().toISOString().split('T')[0]`
-- Renders page header + back link + `<CreateMovementForm>`
-
-### 4. New component: `create-movement-form.tsx` (client component)
-
-Full form for creating a FinancialMovement inside an existing PaymentGroup:
-
-**Fixed/inherited from PaymentGroup:**
-- `centerId`, center display name, and `direction` — read-only, not user-editable
-
-**User-editable fields:**
-- `movementDate` — date input (default today)
-- `description` — required text input
-- Category → Type → Detail cascading selects (client-side filtering, fully controlled state)
-- `vatMode` — NO_VAT / STANDARD / REVERSE_CHARGE
-- `amountNet` — number input (controlled)
-- `vatRate` — number input (visible only when vatMode ≠ NO_VAT)
-
-**Computed read-only display:**
-- `vatAmount = Math.round(amountNet * (vatRate/100) * 100) / 100` (0 when NO_VAT)
-- `amountGross` computed via integer-scaled addition: `(Math.round(amountNet*100) + Math.round(vatAmount*100)) / 100`
-  — guarantees server-side check `scaledGross === scaledNet + scaledVat` always passes
-
-**Optional:**
-- `note` — textarea
-
-**On submit:** calls `createFinancialMovement()`, redirects to `/finance/payment-groups/[pgId]` on success, shows inline error on failure.
+`ACTIVE` is not a valid status in this codebase. The valid statuses are: `CONCEPT`, `WAITING_FOR_PAYMENT`, `DOCUMENT_PREPARATION`, `WAITING_FOR_DOCUMENTS`, `EXECUTION`, `COMPLETED`, `CANCELLED`. The dialog loads all orders (`listOrders({ limit: 50 })`) and excludes CANCELLED client-side, giving the operator access to all live and completed orders.
 
 ---
 
 ## Verification
 
 - `npx tsc --noEmit` — zero errors
-- Spec compliance reviewed by dedicated reviewer subagent — all requirements verified
-- Code quality reviewed — 4 issues found and fixed before completion:
-  - VAT float accumulation fixed (integer-scaled amountGross)
-  - `name` attributes added to controlled inputs
-  - Detail select made fully controlled with correct reset on category/type change
-  - Dead `name="vatMode"` removed from controlled vatMode select
+- Spec compliance reviewed by dedicated subagent — all requirements verified
+- Code quality reviewed — 3 issues found and fixed:
+  - Filter onChange now clears `selectedOrderId` (prevents stale hidden selection)
+  - NaN guard added for invalid `remaining` prop in submit handler
+  - Truncation warning added when 50-item limit is hit
 
 ---
 
 ## Unresolved Risks / Deferred Items
 
-- **Server page uses `getPaymentGroupDetail`** — fetches all movements + allocations unnecessarily for this form. Acceptable in Phase 1; a dedicated `getPaymentGroupHeader` is worth adding before data volume grows.
-- **`defaultMovementDate` is UTC-based** — may show yesterday for European users past local midnight. Low risk for internal operator tool.
-- **`PaymentGroupDetail.direction` typed as `string`** (not `FinanceDirection`) — causes cast in the form component. Upstream type tightening deferred.
-- **No empty-detail-list guard** — if a type has zero active details the submit fails at server with ID-not-found rather than a friendly message.
+- **50-order limit with no server-side search** — the dialog fetches at most 50 orders. When the order table grows, operators will need to use the text filter more carefully. A proper fix requires wiring the filter input to `listOrders({ search: filter })` with debounce (server-side ilike on order number). Deferred to a future session when data volume justifies it.
+- **COMPLETED orders included** — by design for Phase 1. Allocating to a completed order is an edge case but not blocked.
+- **Tailwind palette inconsistency** — trigger button uses `bg-gray-900` while existing `AddAllocationDialog` uses `bg-slate-800`. Cosmetic, deferred.
 
 ---
 
 ## Branch Continuity
 
-Branch: `feat-relations-phase-1a`
-Last clean commit: `33a2b24`
-Status: Wave 12.2 complete, NOT YET committed (per instruction)
+Branch: `feat/relations-phase-1a`
+Last clean commit: `764a78c`
+Status: Wave 12.3 complete, NOT YET committed (per instruction)
 
-Next logical step: Wave 12.3 — PaymentGroup → Order allocation from the finance side.
+The standalone Finance income operator loop is now complete:
+create PaymentGroup → create FinancialMovement → allocate to Order.
+
+Next logical step: Wave 12.4 — cancel allocation from PaymentGroup side, or branch finish.
